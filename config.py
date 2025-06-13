@@ -3,6 +3,11 @@
 """
 
 import logging
+import os
+from dotenv import load_dotenv
+
+# 加载.env文件中的环境变量
+load_dotenv()
 
 # 配置日志
 logging.basicConfig(
@@ -14,10 +19,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # OpenAI API配置
-OPENAI_API_KEY = ""
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    logger.warning("OPENAI_API_KEY not found in environment variables")
 
 # Pinecone API配置
-PINECONE_API_KEY = ""
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+if not PINECONE_API_KEY:
+    logger.warning("PINECONE_API_KEY not found in environment variables")
 PINECONE_INDEX_NAME = "wh40kcodex"
 
 # 模型配置

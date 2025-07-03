@@ -13,7 +13,14 @@ __pycache__/
 
 # 日志文件
 *.log
-
+# 存放输出文件
+DATAUPLOAD/chunks/
+# 存放测试文件
+test/testdata/
+document/
+chunks/
+dict/
+test/
 # IDE相关
 .idea/
 .vscode/

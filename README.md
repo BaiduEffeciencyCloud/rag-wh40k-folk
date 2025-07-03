@@ -15,12 +15,20 @@
 ## 使用方法
 1. 确保已安装所有依赖项：
    ```bash
-   pip install -r requirements.txt
+   pip3 install -r requirements.txt
    ```
 
-2. 在 `config.py` 中配置OpenAI API Key和Pinecone API Key。
+2. 配置环境变量：
+   - 复制 `document/env_template.md` 中的配置模板到项目根目录的 `.env` 文件
+   - 填写所有必需的敏感信息（API密钥、数据库连接信息等）
+   - 确保 `.env` 文件不会被提交到版本控制系统
 
-3. 运行应用程序：
+3. 验证配置：
+   ```bash
+   python3 test/test_config.py
+   ```
+
+4. 运行应用程序：
    ```bash
    python3 app.py
    ```
@@ -33,13 +41,26 @@
    ```
 
 ## 配置说明
-- `OPENAI_API_KEY`：OpenAI API密钥。
-- `PINECONE_API_KEY`：Pinecone API密钥。
-- `PINECONE_INDEX_NAME`：Pinecone索引名称。
-- `DEFAULT_TEMPERATURE`：默认温度参数。
-- `EMBADDING_MODEL`：嵌入模型名称。
-- `LLM_MODEL`：LLM模型名称。
-- `RERANK_MODEL`：重排序模型名称。
+
+### 必需配置（敏感信息）
+所有敏感信息必须通过环境变量配置，不支持默认值：
+
+- `OPENAI_API_KEY`：OpenAI API密钥
+- `PINECONE_API_KEY`：Pinecone API密钥
+- `PINECONE_INDEX`：Pinecone索引名称
+- `NEO4J_URI`：Neo4j数据库连接URI
+- `NEO4J_USERNAME`：Neo4j用户名
+- `NEO4J_PASSWORD`：Neo4j密码
+
+### 可选配置（有默认值）
+- `EMBEDDING_MODEL`：嵌入模型名称（默认：text-embedding-ada-002）
+- `LLM_MODEL`：LLM模型名称（默认：gpt-3.5-turbo）
+- `RERANK_MODEL`：重排序模型名称（默认：bge-reranker-v2-m3）
+- `DEFAULT_TEMPERATURE`：默认温度参数（默认：0.7）
+- `DEFAULT_TOP_K`：默认返回结果数（默认：15）
+- `QUERY_TIMEOUT`：查询超时时间（默认：30秒）
+
+详细配置说明请参考 `document/env_template.md`
 
 ## 日志配置
 - 日志级别设置为 `INFO`，格式为 `%(asctime)s - %(name)s - %(levelname)s - %(message)s`。
@@ -49,8 +70,10 @@
 - 赛季补丁: https://assets.warhammer-community.com/chi_04-06_warhammer_40000_core_rules_balance_dataslate-mcbpvplq49-fd0mqwnlxf.pdf 
 
 ## 注意事项
-- 确保在 `config.py` 中正确配置API密钥和模型名称。
-- 确保Pinecone索引已创建并可用。
+- **安全第一**：确保 `.env` 文件包含所有必需的敏感信息，且不会被提交到版本控制系统
+- **配置验证**：运行前使用 `python3 test/test_config.py` 验证配置是否正确
+- **数据库连接**：确保Neo4j数据库和Pinecone索引已创建并可用
+- **API密钥**：确保所有API密钥有效且有足够的配额
 
 ## 贡献
 欢迎提交问题和改进建议！ 

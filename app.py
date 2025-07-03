@@ -2,12 +2,10 @@ import streamlit as st
 import logging
 import os
 import argparse
-from query_expander import QueryExpander
-from vector_search import VectorSearch
 from config import (
     OPENAI_API_KEY,
     PINECONE_API_KEY,
-    PINECONE_INDEX_NAME,
+    PINECONE_INDEX,
     DEFAULT_TEMPERATURE,
     LOG_FORMAT,
     LOG_FILE,
@@ -30,14 +28,13 @@ os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
 # 解析命令行参数
 parser = argparse.ArgumentParser()
-parser.add_argument('--mode', type=str, default='expand',
-                    help='查询处理模式：expand（扩展）、enhance（增强）、decompose（分解）、vector（向量搜索）、normal（基础向量检索）')
+parser.add_argument('--mode', type=str, default='cot',
+                    help='查询处理模式：cot（思维链检索）、exp（传统扩展器+向量检索）、vector（原始向量检索）')
 parser.add_argument('--top_k', type=int, default=5,
-                    help='返回结果数量（仅vector/normal模式有效）')
+                    help='返回结果数量')
 args = parser.parse_args()
 
-# 获取模式（优先使用命令行参数，其次使用环境变量，最后使用默认值）
-MODE = args.mode or os.getenv('MODE', 'expand')
+MODE = args.mode or os.getenv('MODE', 'cot')
 TOP_K = args.top_k or int(os.getenv('TOP_K', 5))
 
 # 设置页面配置
@@ -66,9 +63,34 @@ def main():
     st.header(APP_HEADER)
     
     # 显示当前模式
-    mode_display = "查询扩展" if MODE == "expand" else "基础向量检索"
+    if MODE == "cot":
+        mode_display = "思维链检索（cot_search）"
+    elif MODE in ["exp", "expand"]:
+        mode_display = "传统扩展器+向量检索"
+    else:
+        mode_display = "原始向量检索"
     st.sidebar.info(f"当前运行模式：{mode_display}")
-    processor = QueryExpander(temperature=DEFAULT_TEMPERATURE)
+
+    # 初始化不同模式下的处理器
+    if MODE == "cot":
+        from cot_search import CoTSearch
+        cot_search = CoTSearch()
+    elif MODE in ["exp", "expand"]:
+        from query_expander import QueryExpander
+        from vector_search import VectorSearch
+        processor = QueryExpander(temperature=DEFAULT_TEMPERATURE)
+        vector_search = VectorSearch(
+            pinecone_api_key=PINECONE_API_KEY,
+            index_name=PINECONE_INDEX,
+            openai_api_key=OPENAI_API_KEY
+        )
+    else:
+        from vector_search import VectorSearch
+        vector_search = VectorSearch(
+            pinecone_api_key=PINECONE_API_KEY,
+            index_name=PINECONE_INDEX,
+            openai_api_key=OPENAI_API_KEY
+        )
 
     # 创建输入框
     user_query = st.text_input("请输入您的规则查询：", placeholder="例如：载具在近战范围内可以使用警戒射击技能吗？")
@@ -77,29 +99,39 @@ def main():
     if st.button("提交问题"):
         if user_query:
             with st.spinner("机魂正在思索..."):
-                try:                        
-                    # 扩展查询
-                    expanded_query = processor.expand_query(user_query)
-                    # 对扩展查询进行搜索
-                    st.write("\n搜索结果：")
-                    results = processor.vector_search.search(expanded_query)
-                    for i, result in enumerate(results, 1):
-                        st.write(f"{i}. {result['text']}")                            
+                try:
+                    if MODE == "cot":
+                        result = cot_search.search(user_query, top_k=TOP_K)
+                        st.write("\n💡 最终答案：")
+                        st.write(result.get('final_answer', '无答案'))
+                        st.write("\n🔍 检索详情：")
+                        for i, r in enumerate(result.get('integrated_results', []), 1):
+                            st.write(f"{i}. {r.text}")
+                    elif MODE in ["exp", "expand"]:
+                        expanded_query = processor.expand_query(user_query)
+                        st.write(f"\n🤔 扩展后的查询：{expanded_query}")
+                        st.write("\n搜索结果：")
+                        results = vector_search.search_and_generate_answer(expanded_query, top_k=TOP_K)
+                        for i, result in enumerate(results, 1):
+                            st.write(f"{i}. {result['text']}")
+                    else:
+                        st.write("\n搜索结果：")
+                        results = vector_search.search_and_generate_answer(user_query, top_k=TOP_K)
+                        for i, result in enumerate(results, 1):
+                            st.write(f"{i}. {result['text']}")
                 except Exception as e:
                     st.error(f"处理查询时出错：{str(e)}")
         else:
             st.warning("请输入问题！")
 
-    
     # 添加模式说明
     st.markdown("### 模式说明")
     st.markdown("""
         **查询扩展模式**：
-        - 生成多个相关问题
-        - 扩大检索范围
-        - 整合所有相关信息
+        - **cot模式**：使用思维链检索（cot_search），多变体检索+LLM答案生成
+        - **exp/expand模式**：传统扩展器+向量检索
+        - **vector模式**：原始向量检索
     """)
-
 
 if __name__ == "__main__":
     main() 

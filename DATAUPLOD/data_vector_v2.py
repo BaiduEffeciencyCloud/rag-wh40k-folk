@@ -77,11 +77,18 @@ class DocumentChunker:
 
         enriched = []
         for heading, chunk in raw_chunks:
-            ctype = 'general'
+            matched_types = []
             for pattern, tag in self.special_patterns.items():
                 if re.search(pattern, chunk):
-                    ctype = tag
-                    break
+                    matched_types.append(tag)
+            
+            # 如果没有匹配到任何特殊类型，使用默认的general类型
+            if not matched_types:
+                ctype = 'general'
+            else:
+                # 将所有匹配的类型用逗号连接
+                ctype = ', '.join(matched_types)
+            
             metadata = {
                 'text': chunk,
                 'chunk_type': ctype,
@@ -175,7 +182,9 @@ python DATAUPLOD/data_vector_v2.py ../test/testdata/40kcorerule.md
         '能力': 'ability_rule',
         '单位': 'unit_rule',
         '装备': 'equipment_rule',
-        '特性': 'trait_rule'
+        '特性': 'trait_rule',
+        '分队': 'detachment_rule',
+        '军队规则': 'army_rule'
     }
     
     # 创建切片器实例
@@ -222,6 +231,6 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         test_file = sys.argv[1]
     else:
-        test_file = "../test/testdata/40kcorerule.md"
+        test_file = "../test/testdata/aeldaricodex.md"
     
     main(test_file) 

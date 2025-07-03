@@ -7,14 +7,17 @@ import tiktoken
 from langchain.text_splitter import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 import pinecone
 from tenacity import retry, wait_exponential, stop_after_attempt
+import sys
+sys.path.append('..')
+from config import EMBADDING_MODEL, PINECONE_API_KEY, LLM_MODEL
 
 # Constants or environment config
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENV = os.getenv("PINECONE_ENVIRONMENT")
-OPENAI_EMBED_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
+# 使用统一的嵌入模型配置
+OPENAI_EMBED_MODEL = EMBADDING_MODEL
 
 # Tokenizer for token-based splitting
-TOKEN_ENCODER = tiktoken.encoding_for_model("gpt-3.5-turbo")
+TOKEN_ENCODER = tiktoken.encoding_for_model(LLM_MODEL)
 
 # Minimum characters per chunk
 MIN_CHARS = 100

@@ -3,9 +3,9 @@ from pinecone import Pinecone
 from openai import OpenAI
 from typing import List, Dict, Any
 import logging
-from config import OPENAI_API_KEY, RERANK_MODEL, EMBADDING_MODEL, get_embedding_model, BM25_K1, BM25_B, BM25_MIN_FREQ, BM25_MAX_VOCAB_SIZE, BM25_CUSTOM_DICT_PATH, BM25_MODEL_PATH, BM25_VOCAB_PATH
+from config import OPENAI_API_KEY, RERANK_MODEL, EMBADDING_MODEL, get_embedding_model, BM25_K1, BM25_B, BM25_MIN_FREQ, BM25_MAX_VOCAB_SIZE, BM25_CUSTOM_DICT_PATH, BM25_MODEL_PATH, BM25_VOCAB_PATH, HYBRID_ALPHA
 import pinecone
-from DATAUPLOD.bm25_manager import BM25Manager
+from dataupload.bm25_manager import BM25Manager
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -182,7 +182,7 @@ class VectorSearch:
         hsparse = {"indices": sparse["indices"], "values": [v * (1 - alpha) for v in sparse["values"]]}
         return hdense, hsparse
 
-    def search(self, query: str, top_k: int = 10, alpha: float = 0.3) -> List[Dict[str, Any]]:
+    def search(self, query: str, top_k: int = 10, alpha: float = None) -> List[Dict[str, Any]]:
         """
         执行hybrid向量搜索，返回原始检索结果
         Args:
@@ -193,6 +193,10 @@ class VectorSearch:
             List[Dict[str, Any]]: 原始搜索结果列表，包含metadata和score
         """
         try:
+            # 使用配置的alpha值，如果未传入则使用默认值
+            if alpha is None:
+                alpha = HYBRID_ALPHA
+            
             # 获取dense embedding
             query_embedding = self.get_embedding(query)
             # 获取sparse embedding
@@ -388,7 +392,7 @@ class VectorSearch:
                 include_metadata=True,
                 filter=filter_dict,
                 hybrid_search=True,
-                alpha=0.3,
+                alpha=HYBRID_ALPHA,
                 rerank_config={
                     "model": RERANK_MODEL,
                     "top_k": top_k

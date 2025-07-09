@@ -5,7 +5,7 @@ from pinecone import Pinecone
 from openai import OpenAI
 # 动态添加项目根目录到模块搜索路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import OPENAI_API_KEY, RERANK_MODEL, EMBADDING_MODEL
+from config import OPENAI_API_KEY, RERANK_MODEL, EMBADDING_MODEL, HYBRID_ALPHA
 import logging
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class SubQueryRetriever:
                     include_metadata=True,
                     filter=filter_dict,
                     hybrid_search=True,
-                    alpha=0.3,
+                    alpha=HYBRID_ALPHA,
                     rerank_config={
                         "model": RERANK_MODEL,
                         "top_k": top_k

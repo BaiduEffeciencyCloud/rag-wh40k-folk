@@ -7,6 +7,7 @@ import os
 from dotenv import load_dotenv
 from pinecone import Pinecone
 from langchain_openai import OpenAIEmbeddings
+from dataupload.phrase_weight import PhraseWeightScorer
 
 # 加载.env文件中的环境变量
 load_dotenv()
@@ -73,7 +74,9 @@ MAX_CONTEXT_RESULTS = int(os.getenv("MAX_CONTEXT_RESULTS", "10"))  # 答案生�
 EMBADDING_MODEL = os.getenv("EMBADDING_MODEL", "text-embedding-3-large")
 
 # LLM模型
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
+LLM_IMAGE_MODEL=os.getenv("LLM_IMAGE_MODEL", "gpt-4o")
+
 
 # rerank 模型
 RERANK_MODEL = os.getenv("RERANK_MODEL", "bge-reranker-v2-m3")
@@ -81,12 +84,36 @@ RERANK_MODEL = os.getenv("RERANK_MODEL", "bge-reranker-v2-m3")
 # BM25相关配置
 BM25_K1 = float(os.getenv('BM25_K1', '1.5'))
 BM25_B = float(os.getenv('BM25_B', '0.75'))
-BM25_MIN_FREQ = int(os.getenv('BM25_MIN_FREQ', '5'))
-BM25_MAX_VOCAB_SIZE = int(os.getenv('BM25_MAX_VOCAB_SIZE', '10000'))
+BM25_MIN_FREQ = int(os.getenv('BM25_MIN_FREQ', '3'))
+BM25_MAX_VOCAB_SIZE = int(os.getenv('BM25_MAX_VOCAB_SIZE', '4000'))
 BM25_CUSTOM_DICT_PATH = os.getenv('BM25_CUSTOM_DICT_PATH', 'dicts/warhammer40k.txt')
 BM25_MODEL_PATH = os.getenv('BM25_MODEL_PATH', 'models/bm25_model.pkl')
-BM25_VOCAB_PATH = os.getenv('BM25_VOCAB_PATH', 'models/bm25_vocab.json')
+BM25_VOCAB_PATH = os.getenv('BM25_VOCAB_PATH', 'dict/')
+
+# BM25文件路径配置
+BM25_MODEL_DIR = os.getenv('BM25_MODEL_DIR', 'models')
+BM25_VOCAB_DIR = os.getenv('BM25_VOCAB_DIR', 'dict')
+BM25_MODEL_FILENAME = os.getenv('BM25_MODEL_FILENAME', 'bm25_model.pkl')
+BM25_VOCAB_FILENAME_PATTERN = os.getenv('BM25_VOCAB_FILENAME_PATTERN', 'bm25_vocab_{timestamp}.json')
+
+# BM25训练配置
+BM25_ENABLE_INCREMENTAL = os.getenv('BM25_ENABLE_INCREMENTAL', 'true').lower() == 'true'
+BM25_SAVE_AFTER_UPDATE = os.getenv('BM25_SAVE_AFTER_UPDATE', 'true').lower() == 'true'
+
+# BM25性能配置
+BM25_BATCH_SIZE = int(os.getenv('BM25_BATCH_SIZE', '1000'))
+BM25_CACHE_SIZE = int(os.getenv('BM25_CACHE_SIZE', '1000'))
+
+# Hybrid检索配置
+HYBRID_ALPHA = float(os.getenv('HYBRID_ALPHA', '0.3'))
+
 PINECONE_SPARSE_DIMENSION = int(os.getenv('PINECONE_SPARSE_DIMENSION', '10000'))
+
+phrase_weight_scorer = PhraseWeightScorer(
+    df_thresholds=(1, 2, 3),
+    pmi_threshold=3.0,
+    boost_factors=(0.2, 0.1, 0.0, -0.5)
+)
 
 def get_pinecone_index():
     """
@@ -115,6 +142,13 @@ def get_embedding_model():
         dimensions=1024  # 强制指定输出维度为1024，与index一致
     )
     logger.info(f"Embedding model '{EMBADDING_MODEL}' initialized with dimensions=1024.")
+    # 增加shape打印，便于排查实际输出维度
+    try:
+        test_vec = embeddings.embed_query("test shape")
+        logger.info(f"[DEBUG] embedding shape: {len(test_vec)}")
+        print(f"[DEBUG] embedding shape: {len(test_vec)}")
+    except Exception as e:
+        logger.warning(f"[DEBUG] embedding shape 获取失败: {e}")
     return embeddings
 
 # 日志配置
@@ -125,4 +159,8 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", 'INFO')
 # 应用配置
 APP_TITLE = os.getenv("APP_TITLE", "战锤40K规则助手")
 APP_ICON = os.getenv("APP_ICON", "⚔️")
-APP_HEADER = os.getenv("APP_HEADER", "") 
+APP_HEADER = os.getenv("APP_HEADER", "")
+
+# 默认输入输出目录常量
+INPUT_DIR = 'test/testdata'
+OUTPUT_DIR = 'dict' 

@@ -1,0 +1,124 @@
+{
+  "evaluators": {
+    "score_distribution": {
+      "name": "score_distribution",
+      "description": "计算检索分数分布统计",
+      "requires_gold": false,
+      "conditions": {
+        "always_execute": true
+      },
+      "visualization": {
+        "type": "histogram",
+        "output_file": "score_distribution.png",
+        "title": "分数分布直方图"
+      }
+    },
+    "embedding_distribution": {
+      "name": "embedding_distribution", 
+      "description": "计算embedding分布可视化",
+      "requires_gold": false,
+      "conditions": {
+        "always_execute": true
+      },
+      "visualization": {
+        "type": "scatter",
+        "output_file": "embedding_distribution.png",
+        "title": "Embedding分布可视化",
+        "method": "tsne"
+      }
+    },
+    "recall_at_k": {
+      "name": "recall_at_k",
+      "description": "计算Recall@K指标",
+      "requires_gold": true,
+      "conditions": {
+        "requires_gold_file": true
+      },
+      "visualization": {
+        "type": "histogram",
+        "output_file": "recall_distribution.png",
+        "title": "召回率分布"
+      }
+    },
+    "mrr": {
+      "name": "mrr",
+      "description": "计算MRR (Mean Reciprocal Rank)指标",
+      "requires_gold": true,
+      "conditions": {
+        "requires_gold_file": true
+      },
+      "visualization": null
+    },
+    "precision_at_k": {
+      "name": "precision_at_k",
+      "description": "计算Precision@K指标",
+      "requires_gold": true,
+      "conditions": {
+        "requires_gold_file": true
+      },
+      "visualization": null
+    },
+    "overlap_stats": {
+      "name": "overlap_stats",
+      "description": "计算多路召回重叠统计",
+      "requires_gold": false,
+      "conditions": {
+        "requires_search_engine": "hybrid"
+      },
+      "visualization": {
+        "type": "multi_histogram",
+        "output_file": "overlap_stats.png",
+        "title": "多路召回重叠统计"
+      }
+    },
+    "hybrid_union_recall": {
+      "name": "hybrid_union_recall",
+      "description": "计算多路召回并集覆盖率",
+      "requires_gold": true,
+      "conditions": {
+        "requires_gold_file": true,
+        "requires_search_engine": "hybrid"
+      },
+      "visualization": null
+    }
+  },
+  "evaluation_groups": {
+    "basic": {
+      "description": "基础评估项（不依赖gold）",
+      "evaluators": ["score_distribution", "embedding_distribution"]
+    },
+    "gold_dependent": {
+      "description": "依赖gold的评估项",
+      "evaluators": ["recall_at_k", "mrr", "precision_at_k"],
+      "conditions": {
+        "requires_gold_file": true
+      }
+    },
+    "hybrid": {
+      "description": "混合检索评估项",
+      "evaluators": ["overlap_stats"],
+      "conditions": {
+        "requires_search_engine": "hybrid"
+      }
+    },
+    "hybrid_with_gold": {
+      "description": "混合检索+gold评估项",
+      "evaluators": ["hybrid_union_recall"],
+      "conditions": {
+        "requires_gold_file": true,
+        "requires_search_engine": "hybrid"
+      }
+    }
+  },
+  "auto_selection_rules": {
+    "default": {
+      "description": "默认自动选择规则",
+      "logic": [
+        "always_include: basic",
+        "if_gold_file_exists: include gold_dependent",
+        "if_search_engine_hybrid: include hybrid",
+        "if_gold_file_exists_and_search_engine_hybrid: include hybrid_with_gold"
+      ]
+    }
+  }
+} 

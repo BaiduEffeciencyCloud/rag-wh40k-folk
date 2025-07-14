@@ -22,7 +22,7 @@ class StraightforwardProcessor(QueryProcessorInterface):
         }
     
     def get_type(self) -> str:
-        return "straightforward"
+        return "straight"
     
     def is_multi_query(self) -> bool:
         return False

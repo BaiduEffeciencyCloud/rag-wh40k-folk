@@ -121,49 +121,78 @@ class DenseRetrievalMetrics:
         return total_precision / len(gold)
     
     @staticmethod
-    def score_distribution(score_list: List[float], bins: int = 50) -> Dict:
+    def score_distribution(score_list: List[float], queries: Optional[List[str]] = None, bins: int = 50) -> Dict:
         """
-        计算分数分布统计
-        
+        计算分数分布统计，并标记低分query（百分位+兜底）
         Args:
             score_list: 分数列表
+            queries: query内容列表（可选，若提供则输出低分query标记）
             bins: 直方图分箱数
-            
         Returns:
-            Dict: 包含hist和bin_edges的字典
+            Dict: 包含hist、bin_edges、统计值和低分query的字典
         """
+        import numpy as np
         if not score_list:
             # 空数据兜底
             hist = [0] * bins
             bin_edges = np.linspace(0, 1, bins + 1)
             return {'hist': hist, 'bin_edges': bin_edges.tolist()}
-        
         hist, bin_edges = np.histogram(score_list, bins=bins, range=(0, 1))
-        return {
+        result = {
             'hist': hist.tolist(),
             'bin_edges': bin_edges.tolist(),
-            'mean': np.mean(score_list),
-            'std': np.std(score_list),
-            'min': np.min(score_list),
-            'max': np.max(score_list)
+            'mean': float(np.mean(score_list)),
+            'std': float(np.std(score_list)),
+            'min': float(np.min(score_list)),
+            'max': float(np.max(score_list))
         }
+        # 低分query标记（百分位+兜底）
+        if queries is not None and len(queries) == len(score_list):
+            if len(queries) == 1:
+                # 只有一条query，直接展示
+                low_score_queries = [
+                    {'query': queries[0], 'score': score_list[0]}
+                ]
+            else:
+                # 多条query，左侧20%分位
+                perc_20 = np.percentile(score_list, 20)
+                low_score_queries = [
+                    {'query': q, 'score': s}
+                    for q, s in zip(queries, score_list) if s <= perc_20
+                ]
+                # 如果20%分位取不到（即没有任何query被选中），回退为低于mean-std的最大一条
+                if not low_score_queries:
+                    mean = result['mean']
+                    std = result['std']
+                    low_score = mean - std
+                    fallback = max(
+                        [{'query': q, 'score': s} for q, s in zip(queries, score_list) if s < low_score],
+                        key=lambda x: x['score'], default=None
+                    )
+                    if fallback:
+                        low_score_queries = [fallback]
+            result['low_score_queries'] = low_score_queries
+            result['queries'] = queries
+            result['scores'] = score_list
+        return result
     
     @staticmethod
     def embedding_distribution(embeddings: np.ndarray, method: str = "tsne", 
                              n_components: int = 2) -> np.ndarray:
         """
         计算embedding分布（降维可视化）
-        
         Args:
             embeddings: embedding向量矩阵
             method: 降维方法 ("tsne" 或 "umap")
             n_components: 降维后的维度
-            
         Returns:
             np.ndarray: 降维后的坐标
         """
+        if embeddings.shape[0] < 2:
+            raise ValueError("样本数过少，无法进行embedding分布降维，可视化需至少2个样本。")
         if method.lower() == "tsne":
-            tsne = TSNE(n_components=n_components, random_state=42)
+            perplexity = min(30, embeddings.shape[0] - 1)
+            tsne = TSNE(n_components=n_components, random_state=42, perplexity=perplexity)
             return tsne.fit_transform(embeddings)
         elif method.lower() == "umap":
             if not UMAP_AVAILABLE:
@@ -260,3 +289,36 @@ class HybridRecallMetrics:
                 total_coverage += 1
         
         return total_coverage / len(gold) 
+
+
+def build_retrieved_dict(queries: List[str], engine, top_k: int) -> Tuple[Dict[str, List[str]], List[float]]:
+    """
+    构建检索结果字典
+    
+    Args:
+        queries: query列表
+        engine: 检索引擎
+        top_k: Top-K参数
+        
+    Returns:
+        Tuple[Dict[str, List[str]], List[float]]: (检索结果字典, 分数列表)
+    """
+    # 执行检索
+    search_results = engine.search(queries, top_k)
+    
+    # 构建结果字典
+    retrieved_dict = {}
+    all_scores = []
+    
+    for i, query in enumerate(queries):
+        query_id = f"q{i+1}"
+        query_results = [r for r in search_results if r['query_id'] == f"q{i}"]
+        
+        # 提取doc_ids和scores
+        doc_ids = [r['doc_id'] for r in query_results]
+        scores = [r['score'] for r in query_results]
+        
+        retrieved_dict[query_id] = doc_ids
+        all_scores.extend(scores)
+    
+    return retrieved_dict, all_scores 

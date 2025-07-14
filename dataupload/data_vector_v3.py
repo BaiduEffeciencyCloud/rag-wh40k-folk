@@ -526,7 +526,27 @@ class SemanticDocumentChunker:
         tokens = self.encoder.encode(text)
         last_tokens = tokens[-n:]
         return self.encoder.decode(last_tokens)
-
+    def _clean_markdown_heading(self, heading: str) -> str:
+        """
+    清理markdown标题，去除markdown符号和多余空格
+    
+    Args:
+        heading: 原始markdown标题，如 "## 标题内容 "
+        
+    Returns:
+        清理后的标题，如 "标题内容"
+        """
+        if not heading:
+            return ""
+    
+        # 去除markdown符号 (#, *, _, `, [, ], (, ), <, >, |, \, /)
+        cleaned = re.sub(r'^[#\s]+', '', heading)  # 去除开头的#和空格
+        cleaned = re.sub(r'[*_`\[\]()<>|\\/]+', '', cleaned)  # 去除markdown符号
+        cleaned = re.sub(r'\s+', ' ', cleaned)  # 将多个空格替换为单个空格
+        cleaned = cleaned.strip()  # 去除前后空格
+    
+        return cleaned
+    
     def chunk_text(self, text: str, extra_metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         主方法：基于语义完整性的文档切片
@@ -626,16 +646,26 @@ class SemanticDocumentChunker:
         """
         创建chunk的精简元数据
         """
+        # 清理heading
+        cleaned_heading = self._clean_markdown_heading(heading) if heading else None
+    
+        # 清理hierarchy中的标题
+        cleaned_hierarchy = {}
+        for i in range(6):
+            h_key = f'h{i+1}'
+            h_value = hierarchy.get(h_key, "")
+            cleaned_hierarchy[h_key] = self._clean_markdown_heading(h_value)
+    
         metadata = {
             'text': text,
-            'section_heading': heading,
-            'chunk_type': self._build_chunk_type(hierarchy, content_type),
+            'section_heading': cleaned_heading,
+            'chunk_type': self._build_chunk_type(cleaned_hierarchy, content_type),
             'content_type': content_type,
             'faction': self._build_faction(),
         }
-        # 只保留h1~h6
+        # 使用清理后的hierarchy设置h1~h6
         for i in range(6):
-            metadata[f'h{i+1}'] = hierarchy.get(f'h{i+1}', "")
+            metadata[f'h{i+1}'] = cleaned_hierarchy.get(f'h{i+1}', "")
         return metadata
 
     def optimize_chunks(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -721,27 +751,49 @@ class SemanticDocumentChunker:
 
     def _split_large_chunk(self, chunk: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
-        分割过大的chunk
+        分割过大的chunk，支持overlap保持上下文连续性
         """
+        import copy
+        
         text = chunk['text']
         sentences = self._split_sentences(text)
         sub_chunks = []
         buffer = ''
+        
         for sentence in sentences:
             candidate = (buffer + ' ' + sentence).strip()
             candidate_tokens = self._count_tokens(candidate)
+            
             if candidate_tokens <= self.max_tokens:
                 buffer = candidate
             else:
                 if buffer.strip():
-                    sub_chunk = chunk.copy()
+                    # 使用深拷贝保留原chunk的元数据
+                    sub_chunk = copy.deepcopy(chunk)
                     sub_chunk['text'] = buffer
                     sub_chunks.append(sub_chunk)
-                buffer = sentence
+                    
+                    # 添加overlap逻辑，保持上下文连续性
+                    overlap = self._get_last_n_tokens(buffer, self.overlap_tokens)
+                    candidate_buffer = (overlap + ' ' + sentence).strip()
+                    candidate_tokens = self._count_tokens(candidate_buffer)
+                    
+                    # 检查overlap + sentence是否超过限制
+                    if candidate_tokens <= self.max_tokens:
+                        buffer = candidate_buffer
+                    else:
+                        # 如果overlap + sentence超过限制，直接使用sentence作为新chunk的开始
+                        # 这样可以确保不会丢失任何内容
+                        buffer = sentence
+                else:
+                    buffer = sentence
+        
+        # 处理最后一个buffer
         if buffer.strip():
-            sub_chunk = chunk.copy()
+            sub_chunk = copy.deepcopy(chunk)
             sub_chunk['text'] = buffer
             sub_chunks.append(sub_chunk)
+        
         return sub_chunks
 
 

@@ -23,7 +23,7 @@
       "shuriken pistol", "power sword", "boltgun", "lasgun", "plasma gun"
     ],
     "phase": [
-        "游戏开始",
+      "游戏开始",
       "指挥阶段",
       "近战阶段", "射击阶段", "移动阶段", "冲锋阶段",
       "战斗阶段", "回合开始", "回合结束",

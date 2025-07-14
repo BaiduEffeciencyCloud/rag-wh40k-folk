@@ -55,30 +55,32 @@ def decide_eval_items(args: argparse.Namespace) -> List[str]:
     return [evaluator.name for evaluator in available_evaluators]
 
 
-def load_queries(file_path: str) -> List[str]:
+def load_queries(file_path_or_query):
     """
-    加载query文件
-    
+    加载query文件或直接处理一句query
     Args:
-        file_path: query文件路径
-        
+        file_path_or_query: 文件路径（.json结尾）或一句自然语言query
     Returns:
         List[str]: query列表
     """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Query文件不存在: {file_path}")
-    
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    
-    # 支持多种格式
-    if isinstance(data, list):
-        return data
-    elif isinstance(data, dict):
-        # 如果是字典格式，提取values
-        return list(data.values())
+    import os
+    import json
+    # 如果是.json结尾且文件存在，按文件处理
+    if isinstance(file_path_or_query, str) and file_path_or_query.strip().endswith('.json') and os.path.exists(file_path_or_query):
+        with open(file_path_or_query, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        # 支持列表或字典格式
+        if isinstance(data, list):
+            return data
+        elif isinstance(data, dict):
+            return list(data.values())
+        else:
+            raise ValueError(f"不支持的query文件格式: {file_path_or_query}")
+    # 否则直接包装成列表
+    elif isinstance(file_path_or_query, str):
+        return [file_path_or_query]
     else:
-        raise ValueError(f"不支持的query文件格式: {type(data)}")
+        raise ValueError("query参数必须为字符串或json文件路径")
 
 
 def load_gold(file_path: str) -> Dict[str, List[str]]:

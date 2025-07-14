@@ -161,6 +161,50 @@ class TestBM25Manager(unittest.TestCase):
         unique_tokens = set(all_tokens)
         self.assertLessEqual(len(bm25.vocabulary), len(unique_tokens))
 
+    def test_whitelist_phrase_always_in_vocabulary(self):
+        """白名单短语即使在训练语料中频率为0，也能被强制纳入vocabulary"""
+        import tempfile
+        # 1. 创建临时白名单文件，包含一个特殊短语
+        whitelist_phrase = "保护性短语X"
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+            f.write(f"{whitelist_phrase} 1000 n\n")
+            userdict_path = f.name
+        try:
+            # 2. 用不包含白名单短语的语料fit
+            corpus = ["普通文本A", "普通文本B"]
+            bm25 = BM25Manager(user_dict_path=userdict_path, min_freq=100)
+            bm25.fit(corpus)
+            # 3. 断言白名单短语被纳入vocabulary
+            self.assertIn(whitelist_phrase, bm25.vocabulary)
+        finally:
+            if os.path.exists(userdict_path):
+                os.unlink(userdict_path)
+
+    def test_whitelist_phrase_sparse_vector_always_present(self):
+        """白名单短语即使语料未出现，sparse向量也应包含该短语（虚拟文本兜底）"""
+        import tempfile
+        from dataupload.bm25_manager import BM25Manager
+        whitelist_phrase = "保护性短语Z"
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+            f.write(f"{whitelist_phrase} 1000 n\n")
+            userdict_path = f.name
+        try:
+            corpus = ["普通文本A", "普通文本B"]
+            bm25 = BM25Manager(user_dict_path=userdict_path, min_freq=100)
+            bm25.fit(corpus)
+            tokens = bm25.tokenize_chinese("测试保护性短语Z是否被整体识别")
+            self.assertIn(whitelist_phrase, tokens)
+            self.assertIn(whitelist_phrase, bm25.vocabulary)
+            # idf中必须有该短语
+            self.assertIn(whitelist_phrase, bm25.bm25_model.idf)
+            # 稀疏向量必须包含该短语的index
+            sparse_vec = bm25.get_sparse_vector("测试保护性短语Z是否被整体识别")
+            idx = bm25.vocabulary[whitelist_phrase]
+            self.assertIn(idx, sparse_vec['indices'])
+        finally:
+            if os.path.exists(userdict_path):
+                os.unlink(userdict_path)
+
 
 class TestBM25ManagerRefactorTargets(unittest.TestCase):
     """BM25Manager重构目标功能测试 - 这些测试应该失败，直到重构完成"""

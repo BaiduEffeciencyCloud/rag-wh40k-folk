@@ -148,7 +148,7 @@ class QueryProcessorFactory:
     @staticmethod
     def create_processor(processor_type: str) -> QueryProcessor:
         """创建Query处理器"""
-        if processor_type == "straightforward":
+        if processor_type == "straight":
             return StraightforwardProcessor()
         elif processor_type == "expand":
             return ExpandProcessor()
@@ -186,37 +186,4 @@ def process_queries_with_factory(queries: List[str], processor_type: str) -> Lis
         List[str]: 处理后的query列表
     """
     processor = QueryProcessorFactory.create_processor(processor_type)
-    return processor.process(queries)
-
-
-def build_retrieved_dict(queries: List[str], engine: SearchEngine, top_k: int) -> Tuple[Dict[str, List[str]], List[float]]:
-    """
-    构建检索结果字典
-    
-    Args:
-        queries: query列表
-        engine: 检索引擎
-        top_k: Top-K参数
-        
-    Returns:
-        Tuple[Dict[str, List[str]], List[float]]: (检索结果字典, 分数列表)
-    """
-    # 执行检索
-    search_results = engine.search(queries, top_k)
-    
-    # 构建结果字典
-    retrieved_dict = {}
-    all_scores = []
-    
-    for i, query in enumerate(queries):
-        query_id = f"q{i+1}"
-        query_results = [r for r in search_results if r['query_id'] == f"q{i}"]
-        
-        # 提取doc_ids和scores
-        doc_ids = [r['doc_id'] for r in query_results]
-        scores = [r['score'] for r in query_results]
-        
-        retrieved_dict[query_id] = doc_ids
-        all_scores.extend(scores)
-    
-    return retrieved_dict, all_scores 
+    return processor.process(queries) 

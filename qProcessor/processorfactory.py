@@ -17,7 +17,7 @@ class QueryProcessorFactory:
             对应的处理器实例
         """
         processors = {
-            "straightforward": StraightforwardProcessor(),
+            "straight": StraightforwardProcessor(),
             "origin": StraightforwardProcessor(),  # origin等同于straightforward
             "expander": ExpanderQueryProcessor(),
             "cot": COTProcessor()
@@ -47,7 +47,7 @@ class QueryProcessorFactory:
     @staticmethod
     def get_available_processors() -> List[str]:
         """获取所有可用的处理器类型"""
-        return ["straightforward", "origin", "expander", "cot"]
+        return ["straight", "origin", "expander", "cot"]
     
     @staticmethod
     def validate_processor_type(processor_type: str) -> bool:

@@ -2,6 +2,7 @@ from typing import Dict, Any, Optional
 from .search_interface import SearchEngineInterface
 from .dense_search import DenseSearchEngine
 from .hybrid_search import HybridSearchEngine
+from .sparse_search import SparseSearchEngine
 
 class SearchEngineFactory:
     """搜索引擎工厂类"""
@@ -9,7 +10,8 @@ class SearchEngineFactory:
     # 支持的搜索引擎类型
     SUPPORTED_TYPES = {
         'dense': DenseSearchEngine,
-        'hybrid': HybridSearchEngine
+        'hybrid': HybridSearchEngine,
+        'sparse': SparseSearchEngine
     }
     
     @classmethod
@@ -33,7 +35,8 @@ class SearchEngineFactory:
         """获取支持的搜索引擎类型"""
         return {
             'dense': 'Dense向量搜索引擎',
-            'hybrid': 'Hybrid混合搜索引擎（推荐）'
+            'hybrid': 'Hybrid混合搜索引擎（推荐）',
+            'sparse': 'Sparse稀疏搜索引擎'
         }
     
     @classmethod

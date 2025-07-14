@@ -5,6 +5,9 @@ import pickle
 import glob
 import logging
 from rank_bm25 import BM25Okapi
+from typing import Dict, List, Any, Optional
+from datetime import datetime
+from config import PINECONE_MAX_SPARSE_VALUES
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +22,7 @@ class BM25Manager:
         self.corpus_tokens = []
         self.raw_texts = []  # 原始文本列表
         self.is_fitted = False
+        self.whitelist_phrases = set()  # 新增：存储白名单短语
         if custom_dict_path and os.path.exists(custom_dict_path):
             jieba.load_userdict(custom_dict_path)
         if user_dict_path and os.path.exists(user_dict_path):
@@ -27,6 +31,10 @@ class BM25Manager:
                 print("[DEBUG] userdict内容预览:")
                 for i, line in enumerate(f):
                     print(line.strip())
+                    # 解析白名单短语，支持格式：短语 频率 词性
+                    phrase = line.strip().split()[0] if line.strip() else None
+                    if phrase:
+                        self.whitelist_phrases.add(phrase)
                     if i >= 19:
                         print("... (仅显示前20行)")
                         break
@@ -44,12 +52,27 @@ class BM25Manager:
         # 剪枝：只保留高频词
         most_common = [w for w, c in counter.items() if c >= self.min_freq]
         most_common = most_common[:self.max_vocab_size]
+        # ====== 白名单强制保护逻辑 ======
+        # 业务背景：白名单（保护性词典）中的短语，属于业务兜底、必须整体召回的高优先级token。
+        # 如果仅靠频率剪枝，低频/未出现的白名单短语会被遗漏，导致检索漏召回，违背保护性设计初衷。
+        # 因此：无论白名单短语在语料中出现频率如何，都必须强制纳入vocabulary。
+        for phrase in getattr(self, 'whitelist_phrases', set()):
+            if phrase not in most_common:
+                most_common.append(phrase)
         self.vocabulary = {w: i for i, w in enumerate(most_common)}
 
     def fit(self, corpus_texts):
         self.raw_texts = list(corpus_texts)
-        self.corpus_tokens = [self.tokenize_chinese(text) for text in self.raw_texts]
         self._build_vocabulary(self.raw_texts)
+        # ====== 白名单短语虚拟文本兜底 ======
+        # 业务背景：BM25Okapi 只会为 fit 语料中出现过的 token 计算 idf。
+        # 如果白名单短语仅被强制加入 vocabulary，但 fit 语料未出现，则 idf 不会分配，导致稀疏向量链路断裂。
+        # 工程兜底：如有白名单短语未出现在语料中，则追加一条“虚拟文本”，内容为所有未出现的白名单短语，用空格拼接。
+        # 这样 BM25Okapi 的 idf 统计能覆盖所有白名单短语，且对正常权重分布影响极小。
+        missing_phrases = [p for p in getattr(self, 'whitelist_phrases', set()) if all(p not in text for text in self.raw_texts)]
+        if missing_phrases:
+            self.raw_texts.append(' '.join(missing_phrases))
+        self.corpus_tokens = [self.tokenize_chinese(text) for text in self.raw_texts]
         self.bm25_model = BM25Okapi(self.corpus_tokens, k1=self.k1, b=self.b)
         self.is_fitted = True
 
@@ -64,6 +87,7 @@ class BM25Manager:
         if not self.is_fitted:
             raise ValueError("BM25Manager未训练，请先fit语料库")
         tokens = self.tokenize_chinese(text)
+        logger.info("拆分后的query是:" +str(tokens))
         indices, values = [], []
         avgdl = self.bm25_model.avgdl
         k1, b = self.bm25_model.k1, self.bm25_model.b
@@ -76,10 +100,30 @@ class BM25Manager:
                 idf = self.bm25_model.idf.get(token, 0)
                 tf = freq
                 denom = tf + k1 * (1 - b + b * dl / avgdl)
-                weight = idf * (tf * (k1 + 1)) / denom if denom > 0 else 0
-                if weight > 0:
+                score = idf * tf * (k1 + 1) / denom
+                if score > 0:
                     indices.append(self.vocabulary[token])
-                    values.append(float(weight))
+                    values.append(score)
+        logger.info(f"[DEBUG] sparse indices: {indices}, values: {values}")
+        # 追加写入本地 query_sparse.log
+        with open("query_sparse.log", "a", encoding="utf-8") as f:
+            f.write(f"[DEBUG] sparse indices: {indices}, values: {values}\n")
+        # 防御性检查：indices和values必须长度一致，这是稀疏向量的基本要求。
+        # indices代表词典中token的id，values代表对应的权重，二者必须一一对应。
+        # 注意：tokens（分词结果）和indices长度可能不一致，因为只有词典内的token才会分配index。
+        if len(indices) != len(values):
+            raise Exception(f"indices和values长度不一致: indices={len(indices)}, values={len(values)}")
+        
+        # 防御性检查：indices长度不能超过PINECONE_MAX_SPARSE_VALUES，否则Pinecone会拒绝。
+        # 一旦超长说明chunk过大或词典过密，需要优化分块策略或词典配置。
+        if len(indices) > PINECONE_MAX_SPARSE_VALUES:
+            raise Exception(f"生成的稀疏向量长度超过PINECONE_MAX_SPARSE_VALUES ({PINECONE_MAX_SPARSE_VALUES}): {len(indices)}")
+        
+        # 防御性检查：indices不能为负数，这违反了稀疏向量的基本语义。
+        # 一旦出现负数说明词典数据污染或上游bug，直接raise异常，防止脏数据流入下游。
+        if any(i < 0 for i in indices):
+            raise Exception(f"检测到非法负数index: {indices}")
+        
         return {"indices": indices, "values": values}
 
     def save_model(self, model_path, vocab_path):

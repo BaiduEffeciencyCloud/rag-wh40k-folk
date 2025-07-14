@@ -19,10 +19,52 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
     
     def __init__(self, pinecone_api_key: str = None, index_name: str = None, openai_api_key: str = None, pinecone_environment: str = None):
         super().__init__(pinecone_api_key, index_name, openai_api_key, pinecone_environment)
-        # 初始化dense搜索引擎作为备用
+        # 初始化dense搜索引擎作为降级备用
         self.dense_engine = DenseSearchEngine(pinecone_api_key, index_name, openai_api_key, pinecone_environment)
+        # 加载BM25Manager
+        self.bm25_manager = None
+        self._load_bm25_manager()
         logger.info(f"Hybrid搜索引擎初始化完成，索引: {self.index_name}, 环境: {self.pinecone_environment}")
-    
+
+    def _load_bm25_manager(self):
+        """加载BM25Manager和词典，参考SparseSearchEngine，自动加载白名单userdict"""
+        try:
+            from dataupload.bm25_config import BM25Config
+            from dataupload.bm25_manager import BM25Manager
+            import glob
+            self.bm25_config = BM25Config()
+            # 自动查找最新白名单userdict
+            whitelist_files = glob.glob(os.path.join("dict", "all_docs_dict_*.txt"))
+            whitelist_files = [f for f in whitelist_files if not f.endswith(".meta.json")]
+            whitelist_path = None
+            if whitelist_files:
+                whitelist_files.sort(reverse=True)
+                whitelist_path = whitelist_files[0]
+                logger.info(f"检测到白名单userdict: {whitelist_path}")
+            else:
+                logger.info("未检测到白名单userdict，按无白名单流程加载BM25Manager")
+            self.bm25_manager = BM25Manager(
+                k1=self.bm25_config.k1,
+                b=self.bm25_config.b,
+                min_freq=self.bm25_config.min_freq,
+                max_vocab_size=self.bm25_config.max_vocab_size,
+                user_dict_path=whitelist_path
+            )
+            vocab_path = self.bm25_manager.get_latest_dict_file()
+            if not vocab_path or not os.path.exists(vocab_path):
+                logger.error("未找到有效的词汇表文件")
+                raise FileNotFoundError("未找到有效的词汇表文件")
+            model_path = self.bm25_config.get_model_path()
+            if os.path.exists(model_path):
+                self.bm25_manager.load_model(model_path, vocab_path)
+                logger.info(f"成功加载BM25模型，模型路径: {model_path}, 词典路径: {vocab_path}")
+            else:
+                self.bm25_manager.load_dictionary(vocab_path)
+                logger.info(f"成功加载BM25词汇表，词典路径: {vocab_path}（模型文件不存在，需要重新训练）")
+        except Exception as e:
+            logger.error(f"加载BM25Manager失败: {str(e)}")
+            self.bm25_manager = None
+
     def get_embedding(self, text: str) -> List[float]:
         """
         获取文本的向量表示
@@ -32,7 +74,6 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             向量表示
         """
         try:
-            # 使用config中的get_embedding_model()方法，确保维度一致
             from config import get_embedding_model
             embeddings = get_embedding_model()
             embedding = embeddings.embed_query(text)
@@ -40,140 +81,97 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
         except Exception as e:
             logger.error(f"获取embedding失败: {str(e)}")
             raise
-    
-    def _build_kg_filter(self, kg_info: Dict[str, Any]) -> Dict[str, Any]:
+
+    def _generate_sparse_vector(self, query_text: str) -> Dict[str, List]:
         """
-        根据KG信息构建filter
+        生成query的sparse向量，参考SparseSearchEngine
         Args:
-            kg_info: KG信息，包含entities和relations
+            query_text: 查询文本
         Returns:
-            Pinecone filter字典
+            Dict[str, List]: 包含indices和values的稀疏向量
         """
-        if not kg_info or not kg_info.get('entities'):
-            return {}
-        
-        entities = kg_info.get('entities', [])
-        if not entities:
-            return {}
-        
-        # 构建OR条件，匹配任意一个实体
-        filter_conditions = []
-        for entity in entities:
-            # 在多个字段中搜索实体
-            entity_conditions = [
-                {"h1": entity},
-                {"h2": entity},
-                {"h3": entity},
-                {"h4": entity},
-                {"h5": entity},
-                {"h6": entity}
-            ]
-            filter_conditions.extend(entity_conditions)
-        
-        if filter_conditions:
-            return {"$or": filter_conditions}
-        
-        return {}
-    
+        if not self.bm25_manager:
+            raise RuntimeError("BM25Manager未初始化")
+        try:
+            sparse_vector = self.bm25_manager.get_sparse_vector(query_text)
+            logger.info(f"BM25稀疏向量生成成功，indices: {sparse_vector['indices'][:5]}...")
+            # Pinecone要求indices为int
+            sparse_vector['indices'] = [int(i) for i in sparse_vector['indices']]
+            return sparse_vector
+        except Exception as e:
+            logger.warning(f"生成sparse向量失败: {str(e)}")
+            raise
+
     def search(self, query: Union[str, Dict[str, Any]], top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
         """
-        执行hybrid搜索
+        执行hybrid搜索（dense+sparse）
         Args:
             query: 查询（字符串或结构化查询对象）
             top_k: 返回结果数量
-            **kwargs: 其他参数（如kg_info、filter等）
+            **kwargs: 其他参数（如filter、alpha等）
         Returns:
             搜索结果列表
         """
-        try:
-            # 处理查询输入
-            if isinstance(query, dict):
-                query_text = query.get('text', '')
-                if not query_text:
-                    logger.warning("结构化查询中没有找到text字段")
-                    return []
-            else:
-                query_text = str(query)
-            
-            if not query_text.strip():
-                logger.warning("查询文本为空")
+        # 处理查询输入
+        if isinstance(query, dict):
+            query_text = query.get('text', '')
+            if not query_text:
+                logger.warning("结构化查询中没有找到text字段")
                 return []
-            
-            # 获取KG信息
-            kg_info = kwargs.get('kg_info', {})
-            
-            # 构建filter
-            filter_dict = kwargs.get('filter', {})
-            if not filter_dict and kg_info:
-                filter_dict = self._build_kg_filter(kg_info)
-            
-            # 获取查询向量
-            query_embedding = self.get_embedding(query_text)
-            
-            # 构建搜索参数
-            search_params = {
-                "vector": query_embedding,
-                "top_k": top_k,
-                "include_metadata": True,
-                "hybrid_search": True,
-                "alpha": HYBRID_ALPHA
-            }
-            
-            # 添加filter参数（如果提供）
-            if filter_dict:
-                search_params['filter'] = filter_dict
-            
-            # 添加rerank配置（如果支持）
-            if RERANK_MODEL:
-                search_params['rerank_config'] = {
-                    "model": RERANK_MODEL,
-                    "top_k": top_k
-                }
-            
-            # 执行hybrid搜索
-            response = self.index.query(**search_params)
-            
-            # 处理搜索结果
-            results = []
-            for match in response.matches:
-                text = match.metadata.get('text', '')
-                if not text or len(text.strip()) < 10:
-                    continue
-                
-                result = {
-                    'text': text,
-                    'score': match.score,
-                    'metadata': match.metadata,
-                    'search_type': 'hybrid',
-                    'query': query_text,
-                    'kg_used': bool(filter_dict)
-                }
-                results.append(result)
-            
-            logger.info(f"Hybrid搜索完成，查询: {query_text[:50]}...，返回 {len(results)} 个结果，KG过滤: {bool(filter_dict)}")
-            return results
-            
+        else:
+            query_text = str(query)
+        if not query_text.strip():
+            logger.warning("查询文本为空")
+            return []
+        # 获取filter参数
+        filter_dict = kwargs.get('filter', {})
+        # 获取alpha参数
+        alpha = kwargs.get('alpha', HYBRID_ALPHA)
+        # 生成dense向量（如失败直接raise异常）
+        query_embedding = self.get_embedding(query_text)
+        # 生成sparse向量（如失败降级dense）
+        try:
+            sparse_vector = self._generate_sparse_vector(query_text)
         except Exception as e:
-            logger.error(f"Hybrid搜索失败: {str(e)}")
-            # 如果hybrid搜索失败，回退到dense搜索
-            logger.info("回退到dense搜索")
+            logger.warning(f"sparse向量生成失败，降级为dense检索: {str(e)}")
             return self.dense_engine.search(query, top_k, **kwargs)
-    
-    def search_with_kg(self, query: Union[str, Dict[str, Any]], kg_info: Dict[str, Any], top_k: int = 10) -> List[Dict[str, Any]]:
-        """
-        使用KG信息进行搜索
-        Args:
-            query: 查询
-            kg_info: KG信息
-            top_k: 返回结果数量
-        Returns:
-            搜索结果列表
-        """
-        return self.search(query, top_k, kg_info=kg_info)
-    
+        # 构建hybrid搜索参数
+        search_params = {
+            "vector": query_embedding,
+            "sparse_vector": sparse_vector,
+            "top_k": top_k,
+            "include_metadata": True,
+            "alpha": alpha
+        }
+        if filter_dict:
+            search_params['filter'] = filter_dict
+        # 执行hybrid搜索（如失败降级dense）
+        try:
+            response = self.index.query(**search_params)
+        except Exception as e:
+            logger.warning(f"Pinecone hybrid检索失败: {str(e)}，降级为dense检索")
+            return self.dense_engine.search(query, top_k, **kwargs)
+        # 处理搜索结果
+        results = []
+        for match in response.matches:
+            text = match.metadata.get('text', '')
+            if not text or len(text.strip()) < 10:
+                continue
+            result = {
+                'doc_id': match.id,
+                'text': text,
+                'score': match.score,
+                'metadata': match.metadata,
+                'search_type': 'hybrid',
+                'query': query_text
+            }
+            results.append(result)
+        logger.info(f"Hybrid检索完成，查询: {query_text[:50]}...，返回 {len(results)} 个结果，alpha: {alpha}")
+        return results
+
     def get_type(self) -> str:
         return "hybrid"
-    
+
     def get_capabilities(self) -> Dict[str, Any]:
         """获取搜索引擎能力信息"""
         return {
@@ -181,10 +179,7 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             "description": "融合dense和sparse的混合检索",
             "supports_filtering": True,
             "supports_hybrid": True,
-            "supports_kg": True,
-            "supports_rerank": bool(RERANK_MODEL),
             "embedding_model": EMBADDING_MODEL,
             "hybrid_alpha": HYBRID_ALPHA,
-            "rerank_model": RERANK_MODEL,
             "index_name": self.index_name
         } 

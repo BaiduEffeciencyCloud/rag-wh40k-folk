@@ -241,7 +241,7 @@ def create_visualization_summary(eval_dir: str, report: Dict) -> str:
         str: 可视化总结文件路径
     """
     summary_path = os.path.join(eval_dir, 'visualization_summary.md')
-    
+
     with open(summary_path, 'w', encoding='utf-8') as f:
         f.write("# 评估可视化总结\n\n")
         f.write(f"生成时间: {report['report_info']['generated_at']}\n\n")
@@ -260,10 +260,43 @@ def create_visualization_summary(eval_dir: str, report: Dict) -> str:
             f.write(f"### {item}\n")
             if isinstance(result, dict):
                 for key, value in result.items():
-                    f.write(f"- {key}: {value}\n")
+                    if key == 'low_score_queries':
+                        f.write("\n**低分query标记（低于均值-1标准差）**\n\n")
+                        if value:
+                            f.write("| Query | Score |\n|---|---|\n")
+                            for q in value:
+                                f.write(f"| {q['query']} | {q['score']:.4f} |\n")
+                        else:
+                            # 没有偏差过大的query，展示最低分query
+                            all_queries = result.get('queries')
+                            all_scores = result.get('scores')
+                            if all_queries and all_scores and len(all_queries) == len(all_scores):
+                                min_idx = min(range(len(all_scores)), key=lambda i: all_scores[i])
+                                min_query = all_queries[min_idx]
+                                min_score = all_scores[min_idx]
+                                f.write(f"本批次无低分query（低于均值-1标准差），最低分query如下：\n\n")
+                                f.write("| Query | Score |\n|---|---|\n")
+                                f.write(f"| {min_query} | {min_score:.4f} |\n")
+                            else:
+                                f.write("本批次无低分query（低于均值-1标准差），且无法获取最低分query。\n\n")
+                    else:
+                        f.write(f"- {key}: {value}\n")
             else:
                 f.write(f"- 结果: {result}\n")
-            f.write("\n")
+            # 插入低分query区块（仅score_distribution有qs）
+            if item == 'score_distribution' and isinstance(result, dict) and 'qs' in result:
+                from .metrics import select_low_score_queries
+                low_qs = select_low_score_queries(result['qs'], ratio=0.2)
+                f.write("\n### 低分query\n\n")
+                f.write("| Query | Score |\n|---|---|\n")
+                for q in low_qs:
+                    f.write(f"| {q['query']} | {q['score']:.4f} |\n")
+            # 插入图片引用（如果有），前后加空行
+            if item in report.get('visualizations', {}):
+                img_file = report['visualizations'][item]['file_path']
+                f.write(f"\n![]({img_file})\n\n")
+            else:
+                f.write("\n")
         
         # 可视化文件
         f.write("## 可视化文件\n")
@@ -277,5 +310,45 @@ def create_visualization_summary(eval_dir: str, report: Dict) -> str:
             f.write("## 错误信息\n")
             for item, error in report['errors'].items():
                 f.write(f"- {item}: {error}\n")
-    
-    return summary_path 
+
+    return summary_path
+
+def generate_pdf_report_from_md(md_path: str, pdf_path: str):
+    """
+    将markdown报告（含图片）渲染为PDF，图片自动嵌入
+    Args:
+        md_path: markdown文件路径
+        pdf_path: 生成的pdf文件路径
+    """
+    import os
+    import pypandoc
+    print("[PDF生成] 当前PYTHON PATH:", os.environ.get("PATH", ""))
+    # 切换到md所在目录，确保图片能被pandoc找到
+    md_dir = os.path.dirname(md_path)
+    md_file = os.path.basename(md_path)
+    pdf_file = os.path.basename(pdf_path)
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(md_dir)
+        output = pypandoc.convert_file(
+            md_file,
+            'pdf',
+            outputfile=pdf_file,
+            extra_args=[
+                '--pdf-engine=xelatex',
+                '-V', 'mainfont=Arial Unicode MS',
+                '-V', 'geometry:margin=1in'
+            ]
+        )
+        print(f"[PDF生成] PDF报告已生成: {pdf_path}")
+    except Exception as e:
+        print(f"[PDF生成] 生成PDF失败: {e}")
+        print("[PDF生成] 检查建议：")
+        print("1. 确认pandoc已安装并在PATH中（pandoc --version）")
+        print("2. 确认xelatex已安装并在PATH中（xelatex --version）")
+        print("3. 如在macOS，确保/Library/TeX/texbin在PATH中")
+        print("4. 可在脚本最前加：os.environ['PATH'] = '/Library/TeX/texbin:' + os.environ['PATH']")
+        print("5. 如仍有问题，将本日志和PATH内容发给开发者协助排查")
+        raise
+    finally:
+        os.chdir(old_cwd)

@@ -105,7 +105,10 @@ BM25_BATCH_SIZE = int(os.getenv('BM25_BATCH_SIZE', '1000'))
 BM25_CACHE_SIZE = int(os.getenv('BM25_CACHE_SIZE', '1000'))
 
 # Hybrid检索配置
-HYBRID_ALPHA = float(os.getenv('HYBRID_ALPHA', '0.3'))
+HYBRID_ALPHA = float(os.getenv('HYBRID_ALPHA', '0.7'))
+
+# Pinecone稀疏向量限制
+PINECONE_MAX_SPARSE_VALUES = int(os.getenv('PINECONE_MAX_SPARSE_VALUES', '2048'))  # Pinecone单个稀疏向量的最大非零元素数量
 
 PINECONE_SPARSE_DIMENSION = int(os.getenv('PINECONE_SPARSE_DIMENSION', '10000'))
 

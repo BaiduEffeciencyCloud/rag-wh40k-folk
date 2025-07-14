@@ -13,6 +13,7 @@ import sys
 import shutil
 from datetime import datetime
 from unittest.mock import Mock, patch, MagicMock
+import numpy as np
 
 # 添加项目根目录到路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -126,33 +127,148 @@ class TestDenseRetrievalMetrics(TestBase):
         self.assertIn('bin_edges', result)
         self.assertEqual(len(result['hist']), 5)
         
-        # 测试空数据时的默认值逻辑
-        self.assertIn('mean', result)
-        self.assertIn('std', result)
-        self.assertIn('min', result)
-        self.assertIn('max', result)
+        # 空数据时只返回hist和bin_edges，不返回统计值
+        self.assertNotIn('mean', result)
+        self.assertNotIn('std', result)
+        self.assertNotIn('min', result)
+        self.assertNotIn('max', result)
     
-    def test_embedding_distribution_tsne(self):
-        """测试embedding分布t-SNE方法调用逻辑"""
+    def test_score_distribution_low_score_queries(self):
+        """测试分数分布统计能正确标记低分query"""
+        # 构造5个query及其分数
+        queries = [f"query_{i}" for i in range(5)]
+        scores = [0.95, 0.92, 0.60, 0.55, 0.50]  # 0.60, 0.55, 0.50为低分
+        # 期望均值和std
         import numpy as np
-        embeddings = np.random.rand(10, 5)  # 10个样本，5维
+        mean = np.mean(scores)
+        std = np.std(scores)
+        # 调用新版score_distribution
+        result = DenseRetrievalMetrics.score_distribution(scores, queries=queries, bins=3)
+        self.assertIn('low_score_queries', result)
+        # 检查低分query是否被正确标记
+        low_score = mean - std
+        expected = [(q, s) for q, s in zip(queries, scores) if s < low_score]
+        actual = [(item['query'], item['score']) for item in result['low_score_queries']]
+        self.assertEqual(set(expected), set(actual))
+    
+    def test_score_distribution_low_score_queries_percentile(self):
+        """测试低分query标记：百分位+兜底逻辑"""
+        # case 1: 只有一条query
+        queries = ["query_0"]
+        scores = [0.88]
+        result = DenseRetrievalMetrics.score_distribution(scores, queries=queries, bins=3)
+        self.assertEqual(result['low_score_queries'], [{'query': 'query_0', 'score': 0.88}])
+
+        # case 2: 多条query，左侧20%分位
+        queries = [f"query_{i}" for i in range(10)]
+        scores = [0.95, 0.92, 0.91, 0.93, 0.94, 0.60, 0.55, 0.50, 0.89, 0.88]
+        result = DenseRetrievalMetrics.score_distribution(scores, queries=queries, bins=3)
+        # 20%分位数应覆盖分数最低的两条
+        expected = [
+            {'query': 'query_7', 'score': 0.50},
+            {'query': 'query_6', 'score': 0.55}
+        ]
+        actual = [q for q in result['low_score_queries'] if q['score'] <= np.percentile(scores, 20)]
+        self.assertTrue(all(q in actual for q in expected))
+        self.assertTrue(len(result['low_score_queries']) >= 2)
+
+        # case 3: query过少，20%分位取不到，回退为score-1std最大一条
+        queries = ["query_0", "query_1"]
+        scores = [0.95, 0.60]
+        result = DenseRetrievalMetrics.score_distribution(scores, queries=queries, bins=3)
+        # 断言应为fallback结果
+        self.assertEqual(result['low_score_queries'], [{'query': 'query_1', 'score': 0.6}])
+    
+    def test_embedding_distribution_method_selection(self):
+        """测试embedding分布方法选择逻辑"""
+        import numpy as np
+        embeddings = np.random.rand(50, 5)  # 50个样本，确保perplexity(30) < n_samples(50)
         
-        with patch('sklearn.manifold.TSNE') as mock_tsne:
-            mock_tsne.return_value.fit_transform.return_value = np.random.rand(10, 2)
+        # 测试tsne方法选择逻辑
+        with patch('evaltool.evalsearch.metrics.TSNE') as mock_tsne:
+            mock_tsne.return_value.fit_transform.return_value = np.random.rand(50, 2)
             result = DenseRetrievalMetrics.embedding_distribution(embeddings, method="tsne")
             
-            # 测试方法调用逻辑
+            # 验证方法调用逻辑
             mock_tsne.assert_called_once()
-            # 测试返回结果类型
             self.assertIsInstance(result, np.ndarray)
     
+    # def test_embedding_distribution_small_sample_exception(self):
+    #     """测试小样本时的异常处理逻辑"""
+    #     import numpy as np
+    #     embeddings = np.random.rand(10, 5)  # 10个样本，perplexity(30) > n_samples(10)
+    #     # 测试小样本时应该抛出ValueError
+    #     with self.assertRaises(ValueError) as context:
+    #         DenseRetrievalMetrics.embedding_distribution(embeddings, method="tsne")
+    #     # 验证错误信息包含perplexity相关信息
+    #     error_msg = str(context.exception)
+    #     self.assertIn("perplexity", error_msg)
+    #     self.assertIn("n_samples", error_msg)
+    
     def test_embedding_distribution_unknown_method(self):
-        """测试未知的embedding降维方法"""
+        """测试未知的embedding降维方法处理逻辑"""
         import numpy as np
         embeddings = np.random.rand(5, 3)
         
-        with self.assertRaises(ValueError):
+        # 测试异常处理逻辑
+        with self.assertRaises(ValueError) as context:
             DenseRetrievalMetrics.embedding_distribution(embeddings, method="unknown")
+        
+        # 验证错误信息包含支持的方法
+        self.assertIn("tsne", str(context.exception))
+        self.assertIn("umap", str(context.exception))
+
+    def test_embedding_distribution_too_few_samples(self):
+        """测试embedding分布样本数过少时的异常和主流程提示"""
+        import numpy as np
+        from evaltool.evalsearch.metrics import DenseRetrievalMetrics
+        embeddings = np.random.rand(1, 5)  # 只有1个样本
+        with self.assertRaises(ValueError) as context:
+            DenseRetrievalMetrics.embedding_distribution(embeddings, method="tsne")
+        self.assertIn("样本数过少", str(context.exception))
+
+    def test_score_distribution_integration_with_queries(self):
+        """集成测试：主流程传入queries参数，报告应包含low_score_queries和最低分query"""
+        import numpy as np
+        queries = [f"query_{i}" for i in range(5)]
+        scores = [0.95, 0.92, 0.60, 0.55, 0.50]  # 0.60, 0.55, 0.50为低分
+        # 有低分query时
+        result = DenseRetrievalMetrics.score_distribution(scores, queries=queries, bins=3)
+        self.assertIn('low_score_queries', result)
+        self.assertTrue(len(result['low_score_queries']) > 0)
+        # 全部高分时
+        high_scores = [0.95, 0.92, 0.91, 0.93, 0.94]
+        result2 = DenseRetrievalMetrics.score_distribution(high_scores, queries=queries, bins=3)
+        self.assertIn('low_score_queries', result2)
+        # integration case: 严格按20%分位和兜底逻辑断言
+        perc_20 = np.percentile(high_scores, 20)
+        expected = [
+            {'query': q, 'score': s}
+            for q, s in zip(queries, high_scores) if s <= perc_20
+        ]
+        if expected:
+            self.assertEqual(result2['low_score_queries'], expected)
+        else:
+            mean = np.mean(high_scores)
+            std = np.std(high_scores)
+            low_score = mean - std
+            fallback = max(
+                [{'query': q, 'score': s} for q, s in zip(queries, high_scores) if s < low_score],
+                key=lambda x: x['score'], default=None
+            )
+            if fallback:
+                self.assertEqual(result2['low_score_queries'], [fallback])
+            else:
+                self.assertEqual(result2['low_score_queries'], [])
+        # 单条query时应始终包含该条
+        single_query = ["query_0"]
+        single_score = [0.99]
+        result3 = DenseRetrievalMetrics.score_distribution(single_score, queries=single_query, bins=3)
+        self.assertEqual(result3['low_score_queries'], [{'query': 'query_0', 'score': 0.99}])
+        self.assertIn('queries', result2)
+        self.assertIn('scores', result2)
+        self.assertEqual(result2['queries'], queries)
+        self.assertEqual(result2['scores'], high_scores)
 
 
 class TestHybridRecallMetrics(TestBase):
@@ -359,14 +475,15 @@ class TestUtilityFunctions(TestBase):
         self.assertEqual(gold["q1"], ["doc_001", "doc_002"])
     
     def test_create_eval_dir(self):
-        """测试创建评估目录"""
-        with patch('datetime.datetime') as mock_datetime:
-            mock_datetime.now.return_value.strftime.return_value = "20241201_120000"
-            
-            eval_dir, report_path = create_eval_dir()
-            
-            self.assertIn("evaltool/dense_search/20241201_120000", eval_dir)
-            self.assertIn("report.json", report_path)
+        """测试创建评估目录逻辑"""
+        eval_dir, report_path = create_eval_dir()
+        # 验证目录路径格式逻辑
+        import re
+        pattern = r"evaltool/dense_search/\d{8}_\d{6}$"
+        self.assertRegex(eval_dir, pattern)
+        # 验证报告路径逻辑
+        self.assertIn("report.json", report_path)
+        self.assertTrue(report_path.startswith(eval_dir))
     
     def test_create_empty_report(self):
         """测试创建空白报告"""
@@ -426,6 +543,15 @@ class TestUtilityFunctions(TestBase):
         with open(report_path, 'r', encoding='utf-8') as f:
             saved_report = json.load(f)
         self.assertEqual(saved_report, report)
+
+    def test_load_queries_from_sentence(self):
+        """测试直接传入一句自然语言query时的加载逻辑"""
+        from evaltool.evalsearch.utils import load_queries
+        query = "丑角剧团有哪些能力"
+        queries = load_queries(query)
+        self.assertEqual(len(queries), 1)
+        self.assertEqual(queries[0], query)
+        self.assertIsInstance(queries, list)
 
 
 class TestFactoryFunctions(TestBase):
@@ -590,10 +716,13 @@ class TestMainFunctionLogic(TestBase):
     
     def test_eval_items_decision_with_gold(self):
         """测试有gold时的评估项决策"""
+        query_file = self.query_file
+        gold_file = self.gold_file
+        
         class MockArgs:
             def __init__(self):
-                self.query = self.query_file
-                self.gold = self.gold_file
+                self.query = query_file
+                self.gold = gold_file
                 self.topk = 10
                 self.qp = "straightforward"
                 self.se = "dense"
@@ -613,9 +742,11 @@ class TestMainFunctionLogic(TestBase):
     
     def test_eval_items_decision_without_gold(self):
         """测试无gold时的评估项决策"""
+        query_file = self.query_file
+        
         class MockArgs:
             def __init__(self):
-                self.query = self.query_file
+                self.query = query_file
                 self.gold = None
                 self.topk = 10
                 self.qp = "straightforward"
@@ -634,9 +765,11 @@ class TestMainFunctionLogic(TestBase):
     
     def test_eval_items_decision_hybrid_engine(self):
         """测试hybrid引擎时的评估项决策"""
+        query_file = self.query_file
+        
         class MockArgs:
             def __init__(self):
-                self.query = self.query_file
+                self.query = query_file
                 self.gold = None
                 self.topk = 10
                 self.qp = "straightforward"

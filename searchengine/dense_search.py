@@ -85,8 +85,8 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
                 text = match.metadata.get('text', '')
                 if not text or len(text.strip()) < 10:
                     continue
-                
                 result = {
+                    'doc_id': match.id,
                     'text': text,
                     'score': match.score,
                     'metadata': match.metadata,

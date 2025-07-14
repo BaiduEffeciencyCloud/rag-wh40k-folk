@@ -2,6 +2,8 @@ import tempfile
 import shutil
 import os
 import unittest
+import builtins
+from send2trash import send2trash
 
 class TestBase(unittest.TestCase):
     """所有测试用例的基类，自动保护项目文件"""
@@ -13,11 +15,13 @@ class TestBase(unittest.TestCase):
         super().setUp()
     
     def tearDown(self):
-        # 只删除系统临时目录下的内容
-        for temp_dir in getattr(self, "_created_temp_dirs", []):
-            if temp_dir.startswith(tempfile.gettempdir()):
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir)
+        # 只删除系统临时目录下的内容，区分文件和目录
+        for temp_path in getattr(self, "_created_temp_dirs", []):
+            if temp_path.startswith(tempfile.gettempdir()):
+                if os.path.isfile(temp_path):
+                    os.remove(temp_path)
+                elif os.path.isdir(temp_path):
+                    shutil.rmtree(temp_path)
         super().tearDown()
     
     def create_temp_file(self, prefix="test_", suffix=".tmp"):
@@ -32,11 +36,6 @@ class TestBase(unittest.TestCase):
         return temp_file.name 
 
 # ========== 全局删除保护（使用send2trash） ========== 
-import builtins
-import shutil
-import os
-import tempfile
-from send2trash import send2trash
 
 _original_rmtree = shutil.rmtree
 _original_remove = os.remove

@@ -100,26 +100,6 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
             logger.error(f"Dense搜索失败: {str(e)}")
             return []
         
-
-
-    def rerank(self, query: str, candidates: List[Dict], top_k: int = 5, model: str = RERANK_MODEL, **kwargs) -> List[Dict]:
-        # 1. 提取所有 text（兼容 Pinecone 返回结构）
-        text2item = {item['metadata']['text']: item for item in candidates if 'metadata' in item and 'text' in item['metadata']}
-        documents = list(text2item.keys())
-        rerank_model = model
-        # 2. 调用 Pinecone rerank
-        try:
-            rerank_results = self.pc.inference.rerank(
-                model=rerank_model,
-                query=query,
-                documents=documents,
-                top_n=top_k,
-                return_documents=True
-            )
-            return rerank_results
-        except Exception as e:
-            logger.error(f"Rerank 过程发生错误:{str(e)}")
-        # 3. 组装补全后的结果
     
     def get_type(self) -> str:
         return "dense"

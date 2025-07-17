@@ -7,7 +7,7 @@ import logging
 
 # 动态添加项目根目录到模块搜索路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import OPENAI_API_KEY, EMBADDING_MODEL, HYBRID_ALPHA, RERANK_MODEL,PINECONE_API_KEY
+from config import OPENAI_API_KEY, EMBADDING_MODEL, HYBRID_ALPHA, RERANK_MODEL,PINECONE_API_KEY,RERANK_TOPK
 from .search_interface import SearchEngineInterface
 from .dense_search import DenseSearchEngine
 from .base_search import BaseSearchEngine
@@ -150,29 +150,25 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             search_params['filter'] = filter_dict
         # 执行hybrid搜索（如失败降级dense）
         try:
-            candidates = self.index.query(**search_params)
+            pinecone_response = self.index.query(**search_params)
+            if hasattr(pinecone_response,"matches"):
+                candidates = pinecone_response.matches
+            else:
+                logger.error("Pinecone返回对象无matches属性")
+                raise e
         except Exception as e:
             logger.warning(f"Pinecone hybrid检索失败: {str(e)}，降级为dense检索")
             return self.dense_engine.search(query, top_k, **kwargs)
-
+        
+        #执行rerank
+        rerank_results = self.rerank(query_text,candidates,RERANK_TOPK,model=RERANK_MODEL)
         # 处理搜索结果
-        results = []
-        for match in candidates.matches:
-            text = match.metadata.get('text', '')
-            if not text or len(text.strip()) < 10:
-                continue
-            result = {
-                'doc_id': match.id,
-                'text': text,
-                'score': match.score,
-                'metadata': match.metadata,
-                'search_type': 'hybrid',
-                'query': query_text
-            }
-        results.append(result)
+        results = self.composite(rerank_results,query_text,"hybrid")
+
         logger.info(f"Hybrid检索完成，查询: {query_text[:50]}...，返回 {len(results)} 个结果，alpha: {alpha}")
         return results
-  
+
+        # 3. 组装补全后的结果  
     def get_type(self) -> str:
         return "hybrid"
 
@@ -187,5 +183,3 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             "hybrid_alpha": HYBRID_ALPHA,
             "index_name": self.index_name
         } 
-    def rerank(self, query: str, candidates: List[Dict], top_k: int = 5, model: str = RERANK_MODEL, **kwargs) -> List[Dict]:
-        pass

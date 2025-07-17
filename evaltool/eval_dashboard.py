@@ -34,12 +34,6 @@ def main():
             print("[ERROR] embedding模式下--csv为必填")
             sys.exit(1)
         run_embedding_eval(args.csv, model_name=args.model, top_k=args.top_k, config_file=args.config)
-    elif args.mode == 'answer':
-        print("[INFO] 进入最终答案效果评估模式")
-        if not args.csv:
-            print("[ERROR] answer模式下--csv为必填")
-            sys.exit(1)
-        run_answer_eval_v2(args.csv, top_k=args.top_k)
     elif args.mode == 'dict':
         print("[INFO] 进入BM25词典效果评估模式")
         if not args.f:

@@ -28,17 +28,4 @@ class SearchEngineInterface(ABC):
         """获取搜索引擎能力信息"""
         pass
 
-    @abstractmethod
-    def rerank(self, query: str, documents: List[str], top_k: int = 5, **kwargs) -> List[Dict[str, Any]]:
-        """
-        对候选文档进行重排序（rerank）
-        Args:
-            query: 查询文本
-            documents: 候选文档列表（每个为字符串）
-            top_k: 返回前k个重排序结果
-            **kwargs: 其他参数（如模型名等）
-        Returns:
-            List[Dict]: 每个结果包含text、score等
-        """
-        pass
     

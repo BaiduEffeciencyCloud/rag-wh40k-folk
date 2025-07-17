@@ -83,7 +83,7 @@ class RAGASEvaluator:
         确保与Pinecone数据库的1024维度一致
         """
         try:
-            run_config = RunConfig(timeout=30)  # 设置30秒超时
+            run_config = RunConfig(timeout=TIMEOUT)  # 设置30秒超时
             self.ragas_embeddings = LangchainEmbeddingsWrapper(
                 embeddings=self.embedding_model,
                 run_config=run_config
@@ -247,7 +247,7 @@ class RAGASEvaluator:
         generation_metrics = self._get_metrics_with_embeddings(generation_metrics)
         
         # 使用RunConfig控制并发，避免API限流
-        run_config = RunConfig(max_workers=1, max_retries=3, timeout=60)
+        run_config = RunConfig(max_workers=MAX_WORKERS, max_retries=MAX_RETRIES, timeout=TIMEOUT)
         results = evaluate(dataset, metrics=generation_metrics, run_config=run_config)
         logger.info(f'RAGAS返回的生成指标结果: {results}')
         metric_map = {
@@ -286,7 +286,7 @@ class RAGASEvaluator:
         advanced_metrics = self._get_metrics_with_embeddings(advanced_metrics)
         
         # 使用RunConfig控制并发，避免API限流
-        run_config = RunConfig(max_workers=1, max_retries=3, timeout=60)
+        run_config = RunConfig(max_workers=MAX_WORKERS, max_retries=MAX_RETRIES, timeout=TIMEOUT)
         results = evaluate(dataset, metrics=advanced_metrics, run_config=run_config)
         logger.info(f'RAGAS返回的高级指标结果: {results}')
         metric_map = {
@@ -333,7 +333,7 @@ class RAGASEvaluator:
         all_metrics = self._get_metrics_with_embeddings(all_metrics)
         
         # 使用RunConfig控制并发，避免API限流
-        run_config = RunConfig(max_workers=1, max_retries=3, timeout=60)
+        run_config = RunConfig(max_workers=MAX_WORKERS, max_retries=MAX_RETRIES, timeout=TIMEOUT)
         results = evaluate(dataset, metrics=all_metrics, run_config=run_config)
         logger.info(f'RAGAS返回的所有指标结果: {results}')
         metric_map = {

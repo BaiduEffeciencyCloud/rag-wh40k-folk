@@ -9,7 +9,7 @@ from datetime import datetime
 import subprocess
 import glob
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from DATAUPLOD.bm25_manager import BM25Manager
+from dataupload.bm25_manager import BM25Manager
 
 # 停用词、标点、主语等过滤同前
 punctuations = set('，。！？：；、""''（）—…《》·,.!?;:"\'()[]{}<>|/~`+=-_')

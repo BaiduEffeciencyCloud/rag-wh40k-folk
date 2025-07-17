@@ -2,7 +2,11 @@ import os
 import pinecone
 from openai import OpenAI
 import logging
+from config import RERANK_MODEL
+from typing import Dict, Any, List, Union
 logger = logging.getLogger(__name__)
+
+
 class BaseSearchEngine:
     """搜索引擎基类，负责pinecone和openai初始化"""
     def __init__(self, pinecone_api_key: str = None, index_name: str = None, openai_api_key: str = None, pinecone_environment: str = None):
@@ -52,6 +56,23 @@ class BaseSearchEngine:
                 'search_type': search_engine,
                 'query': query_text
             }
-            logger.info(result)
             results.append(result)
         return results
+    
+    def rerank(self, query: str, candidates: List[Dict], top_k: int = 5, model: str = RERANK_MODEL, **kwargs) -> List[Dict]:
+        # 1. 提取所有 text（兼容 Pinecone 返回结构）
+        text2item = {item['metadata']['text']: item for item in candidates if 'metadata' in item and 'text' in item['metadata']}
+        documents = list(text2item.keys())
+        rerank_model = model
+        # 2. 调用 Pinecone rerank
+        try:
+            rerank_results = self.pc.inference.rerank(
+                model=rerank_model,
+                query=query,
+                documents=documents,
+                top_n=top_k,
+                return_documents=True
+            )
+            return rerank_results
+        except Exception as e:
+            logger.error(f"Rerank 过程发生错误:{str(e)}")

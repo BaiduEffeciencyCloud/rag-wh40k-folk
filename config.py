@@ -51,7 +51,7 @@ if not all([NEO4J_TEST_URI, NEO4J_TEST_USERNAME, NEO4J_TEST_PASSWORD]):
     logger.warning("Neo4j test configuration incomplete. Please set NEO4J_TEST_URI, NEO4J_TEST_USERNAME, and NEO4J_TEST_PASSWORD in .env file")
 
 # 模型配置
-DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_TEMPERATURE", "0.7"))
+DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_TEMPERATURE", "0.4"))
 DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", "15"))
 
 # 超时配置
@@ -80,6 +80,7 @@ LLM_IMAGE_MODEL=os.getenv("LLM_IMAGE_MODEL", "gpt-4o")
 
 # rerank 模型
 RERANK_MODEL = os.getenv("RERANK_MODEL", "bge-reranker-v2-m3")
+RERANK_TOPK = 15
 
 # BM25相关配置
 BM25_K1 = float(os.getenv('BM25_K1', '1.5'))
@@ -105,7 +106,9 @@ BM25_BATCH_SIZE = int(os.getenv('BM25_BATCH_SIZE', '1000'))
 BM25_CACHE_SIZE = int(os.getenv('BM25_CACHE_SIZE', '1000'))
 
 # Hybrid检索配置
-HYBRID_ALPHA = float(os.getenv('HYBRID_ALPHA', '0.7'))
+#当 α = 0 时，完全依赖稀疏检索（纯 BM25/TF-IDF）；
+#当 α = 1 时，完全依赖密集检索（纯语义向量匹配）；
+HYBRID_ALPHA = float(os.getenv('HYBRID_ALPHA', '0.3'))
 
 # Pinecone稀疏向量限制
 PINECONE_MAX_SPARSE_VALUES = int(os.getenv('PINECONE_MAX_SPARSE_VALUES', '2048'))  # Pinecone单个稀疏向量的最大非零元素数量

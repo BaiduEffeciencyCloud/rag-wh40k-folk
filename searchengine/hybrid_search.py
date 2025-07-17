@@ -7,10 +7,11 @@ import logging
 
 # 动态添加项目根目录到模块搜索路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import OPENAI_API_KEY, EMBADDING_MODEL, HYBRID_ALPHA, RERANK_MODEL
+from config import OPENAI_API_KEY, EMBADDING_MODEL, HYBRID_ALPHA, RERANK_MODEL,PINECONE_API_KEY
 from .search_interface import SearchEngineInterface
 from .dense_search import DenseSearchEngine
 from .base_search import BaseSearchEngine
+from pinecone import Pinecone
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,8 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
         self.dense_engine = DenseSearchEngine(pinecone_api_key, index_name, openai_api_key, pinecone_environment)
         # 加载BM25Manager
         self.bm25_manager = None
+        # 初始化 Pinecone 实例用于 inference.rerank
+        self.pc = Pinecone(api_key=PINECONE_API_KEY)
         self._load_bm25_manager()
         logger.info(f"Hybrid搜索引擎初始化完成，索引: {self.index_name}, 环境: {self.pinecone_environment}")
 
@@ -50,7 +53,7 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
                 max_vocab_size=self.bm25_config.max_vocab_size,
                 user_dict_path=whitelist_path
             )
-            vocab_path = self.bm25_manager.get_latest_dict_file()
+            vocab_path = self.bm25_manager.get_latest_freq_dict_file()
             if not vocab_path or not os.path.exists(vocab_path):
                 logger.error("未找到有效的词汇表文件")
                 raise FileNotFoundError("未找到有效的词汇表文件")
@@ -147,13 +150,14 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             search_params['filter'] = filter_dict
         # 执行hybrid搜索（如失败降级dense）
         try:
-            response = self.index.query(**search_params)
+            candidates = self.index.query(**search_params)
         except Exception as e:
             logger.warning(f"Pinecone hybrid检索失败: {str(e)}，降级为dense检索")
             return self.dense_engine.search(query, top_k, **kwargs)
+
         # 处理搜索结果
         results = []
-        for match in response.matches:
+        for match in candidates.matches:
             text = match.metadata.get('text', '')
             if not text or len(text.strip()) < 10:
                 continue
@@ -165,10 +169,10 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
                 'search_type': 'hybrid',
                 'query': query_text
             }
-            results.append(result)
+        results.append(result)
         logger.info(f"Hybrid检索完成，查询: {query_text[:50]}...，返回 {len(results)} 个结果，alpha: {alpha}")
         return results
-
+  
     def get_type(self) -> str:
         return "hybrid"
 
@@ -183,3 +187,5 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             "hybrid_alpha": HYBRID_ALPHA,
             "index_name": self.index_name
         } 
+    def rerank(self, query: str, candidates: List[Dict], top_k: int = 5, model: str = RERANK_MODEL, **kwargs) -> List[Dict]:
+        pass

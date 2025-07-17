@@ -66,16 +66,15 @@ def analyze_report_with_llm(md_path: str, api: Optional[str] = None, save_dir: O
     prompt = build_llm_prompt(md_path, md_text)
     llm_result = None
     try:
-        import openai
+        from utils.llm_utils import call_llm
         from openai import OpenAI
         client = OpenAI(api_key=OPENAI_API_KEY)
-        response = client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=prompt,
-            max_tokens=2048,
-            temperature=0.3
+        llm_result = call_llm(
+            client=client,
+            prompt=prompt,
+            temperature=0.3,
+            max_tokens=2048
         )
-        llm_result = response.choices[0].message.content.strip()
     except Exception as e:
         llm_result = f"[LLM分析] API调用失败: {e}\n(可切换为本地模拟或检查API配置)"
     # 保存到insight.md

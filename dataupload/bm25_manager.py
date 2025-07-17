@@ -76,8 +76,23 @@ class BM25Manager:
         self.bm25_model = BM25Okapi(self.corpus_tokens, k1=self.k1, b=self.b)
         self.is_fitted = True
 
-    def incremental_update(self, new_corpus_texts):
-        self.raw_texts.extend(new_corpus_texts)
+    def incremental_update(self, new_corpus_texts, storage=None):
+        """
+        增量训练：持久化+全量重建
+        storage: RawChunkStorage实例，若为None则不做本地持久化
+        """
+        if storage is not None:
+            # 1. 读取历史切片
+            history_chunks = storage.load()
+            # 2. 合并新切片并去重
+            all_chunks = list(dict.fromkeys(history_chunks + new_corpus_texts))
+            # 3. 保存全量切片
+            storage.storage(new_corpus_texts)
+        else:
+            # 兼容老逻辑
+            all_chunks = self.raw_texts + new_corpus_texts
+        # 4. 用全量切片重建BM25模型
+        self.raw_texts = all_chunks
         self.corpus_tokens = [self.tokenize_chinese(text) for text in self.raw_texts]
         self._build_vocabulary(self.raw_texts)
         self.bm25_model = BM25Okapi(self.corpus_tokens, k1=self.k1, b=self.b)

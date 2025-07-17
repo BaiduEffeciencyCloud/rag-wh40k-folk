@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def call_llm(client: OpenAI, 
              prompt: Union[str, List[Dict[str, str]]], 
              model: str = LLM_MODEL,
-             temperature: float = 0.4,
+             temperature: float = 0.2,
              max_tokens: int = 3000,
              **kwargs) -> str:
     """

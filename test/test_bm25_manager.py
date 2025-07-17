@@ -8,6 +8,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dataupload.bm25_manager import BM25Manager
+from test.base_test import TestBase
 
 
 class TestBM25Manager(unittest.TestCase):
@@ -421,6 +422,37 @@ class TestBM25ManagerRefactorTargets(unittest.TestCase):
         self.assertEqual(empty_stats["max_frequency"], 0)
         self.assertEqual(empty_stats["min_frequency"], 0)
 
+
+class TestBM25ManagerIncrementalTrain(TestBase):
+    """增量训练场景下的BM25Manager功能测试（只用真实接口）"""
+    def setUp(self):
+        super().setUp()
+        from dataupload.bm25_manager import BM25Manager
+        from dataupload.storage.raw_chunk_local_storage import RawChunkStorage
+        self.BM25Manager = BM25Manager
+        self.storage = RawChunkStorage(base_dir=self.temp_dir)
+        self.corpus1 = ["战锤40k是一个科幻战争游戏", "星际战士是帝国的精英战士"]
+        self.corpus2 = ["混沌势力威胁着人类帝国", "帝皇是人类帝国的统治者"]
+
+    def test_incremental_update_true_increment(self):
+        bm25 = self.BM25Manager(min_freq=1)
+        # 第一次增量
+        bm25.incremental_update(self.corpus1, storage=self.storage)
+        # 检查模型已包含corpus1内容
+        for text in self.corpus1:
+            tokens = bm25.tokenize_chinese(text)
+            for token in tokens:
+                self.assertIn(token, bm25.vocabulary)
+        # 第二次增量（新进程）
+        new_bm25 = self.BM25Manager(min_freq=1)
+        new_bm25.incremental_update(self.corpus2, storage=self.storage)
+        # 检查模型已包含corpus1和corpus2内容
+        for text in self.corpus1 + self.corpus2:
+            tokens = new_bm25.tokenize_chinese(text)
+            for token in tokens:
+                self.assertIn(token, new_bm25.vocabulary)
+        # 检查raw_texts是否全量累积
+        self.assertEqual(len(new_bm25.raw_texts), len(self.corpus1) + len(self.corpus2))
 
 if __name__ == '__main__':
     unittest.main() 

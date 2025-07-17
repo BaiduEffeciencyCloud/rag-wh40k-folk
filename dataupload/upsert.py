@@ -13,9 +13,10 @@ from dataupload.vector_builder import build_vector_data, batch_upsert_vectors
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dataupload.data_vector_v3 import SemanticDocumentChunker, save_chunks_to_text, save_chunks_to_json
-from dataupload.data_vector_v2 import DocumentChunker
+
 from dataupload.knowledge_graph_manager import KnowledgeGraphManager
 from config import get_pinecone_index, get_embedding_model
+from dataupload.storage.storage_factory import StorageFactory
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -56,9 +57,6 @@ class UpsertManager:
             if self.chunker_version == 'v3':
                 self.chunker = SemanticDocumentChunker()
                 logging.info("✅ SemanticDocumentChunker (v3) 初始化完成")
-            elif self.chunker_version == 'v2':
-                self.chunker = DocumentChunker()
-                logging.info("✅ DocumentChunker (v2) 初始化完成")
             else:
                 raise ValueError(f"不支持的切片器版本: {self.chunker_version}")
             
@@ -161,7 +159,7 @@ class UpsertManager:
             except Exception as e:
                 logging.warning(f"⚠️ 保存BM25模型失败: {e}")
 
-    def process_and_upsert_document(self, file_path: str, enable_kg: bool = True, enable_pinecone: bool = True, extra_metadata: dict = None):
+    def process_and_upsert_document(self, file_path: str, enable_kg: bool = True, enable_pinecone: bool = True, extra_metadata: dict = None, storage_type: str = 'local'):
         """
         处理单个文档并将其入库
         
@@ -218,18 +216,21 @@ class UpsertManager:
 
             # === 修改：初始化BM25Manager并支持模型加载/保存 ===
             self._initialize_bm25_manager(userdict_path)
-            
+
+            # 生成storage对象的目的是为了支持BM25模型的增量更新（incremental_update），
+            # 这样可以将历史切片持久化存储，避免每次都全量重建模型。
+            # 当前实现为本地存储，后续如需支持云端存储（如S3、MongoDB等），只需扩展StorageFactory即可无缝切换。
+            storage = StorageFactory.create_storage(storage_type)
+
             # 如果模型未训练，则进行训练
             if not self.bm25_manager.is_fitted:
                 self.bm25_manager.fit([chunk['text'] for chunk in chunks])
                 logging.info("✅ BM25Manager已训练完成")
-                # 保存模型
                 self._save_bm25_model()
             else:
                 # 模型已存在，进行增量更新
-                self.bm25_manager.incremental_update([chunk['text'] for chunk in chunks])
+                self.bm25_manager.incremental_update([chunk['text'] for chunk in chunks], storage=storage)
                 logging.info("✅ BM25Manager已进行增量更新")
-                # 保存更新后的模型
                 self._save_bm25_model()
 
             # 2. 知识图谱写入
@@ -378,6 +379,7 @@ def main():
     parser.add_argument("--no-kg", action="store_true", help="禁用知识图谱写入")
     parser.add_argument("--no-pinecone", action="store_true", help="禁用Pinecone向量上传")
     parser.add_argument("--faction", type=str, help="指定faction（可选，优先级最高）")
+    parser.add_argument("--storage", type=str, default="local", choices=["local", "cloud"], help="存储类型")
     args = parser.parse_args()
     
     manager = UpsertManager(environment=args.env, chunker_version=args.chunker_version)
@@ -389,7 +391,8 @@ def main():
         file_path=args.file_path,
         enable_kg=not args.no_kg,
         enable_pinecone=not args.no_pinecone,
-        extra_metadata=extra_metadata
+        extra_metadata=extra_metadata,
+        storage_type=args.storage
     )
 
 if __name__ == "__main__":

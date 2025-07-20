@@ -66,89 +66,62 @@ class DataManager:
     
     def _preprocess_conll_format(self, file_path: str) -> str:
         """
-        CoNLL格式预处理：自动修正各种格式错误
-        
-        Args:
-            file_path: 原始CoNLL文件路径
-            
-        Returns:
-            预处理后的文件内容字符串
+        CoNLL格式预处理：自动修正各种格式错误，并记录每一条修改日志
         """
         logger.info(f"开始CoNLL格式预处理: {file_path}")
-        
         processed_lines = []
         current_sentence_lines = []
-        
         def process_sentence_lines(sentence_lines):
-            """处理单个句子的行"""
             if not sentence_lines:
                 return []
-            
             processed_sentence = []
             for i, line in enumerate(sentence_lines):
+                raw_line = line
                 line = line.strip()
-                if line == '':
-                    continue
-                
                 # 1. 处理只有label没有token的行
-                # 检查是否只有标签没有token（如：B-UNIT_TYPE）
                 parts_by_space = line.split()
                 if len(parts_by_space) == 1:
-                    # 只有一部分，需要判断是token还是label
                     word = parts_by_space[0]
                     if word.startswith('B-') or word.startswith('I-') or word.startswith('O'):
-                        # 这是标签，但没有对应的token，删除这一行
-                        logger.warning(f"删除只有label没有token的行: {line}")
+                        logger.warning(f"删除只有label没有token的行: 原始行='{raw_line}'")
                         continue
-                    # 如果是以特定关键词开头的描述性文本，也删除
                     elif word in ['只有label没有token', 'B-UNIT_TYPE']:
-                        logger.warning(f"删除描述性文本行: {line}")
+                        logger.warning(f"删除描述性文本行: 原始行='{raw_line}'")
                         continue
-                    # 其他情况：可能是token，需要添加O标签
                     else:
-                        # 这是token，但没有label，添加O标签
+                        logger.info(f"为只有token的行添加O标签: 原始行='{raw_line}' -> 修正后='{word}\tO'")
                         processed_sentence.append(f"{word}\tO")
-                        logger.info(f"为只有token的行添加O标签: {word}")
                         continue
-                
                 # 2. 统一分隔符：将多个空格转换为制表符
                 if '\t' in line:
-                    # 已经有制表符，直接使用
                     parts = line.split('\t')
                 else:
-                    # 使用空格分割
                     parts = line.split()
-                
+                    if len(parts) >= 2:
+                        logger.info(f"空格分隔符转制表符: 原始行='{raw_line}' -> 修正后='{parts[0]}\t{parts[1]}'")
                 if len(parts) == 0:
-                    # 空行
                     continue
                 elif len(parts) == 1:
-                    # 只有token没有label
                     token = parts[0]
+                    logger.info(f"为只有token的行添加O标签: 原始行='{raw_line}' -> 修正后='{token}\tO'")
                     processed_sentence.append(f"{token}\tO")
-                    logger.info(f"为只有token的行添加O标签: {token}")
                 elif len(parts) >= 2:
-                    # 有token和label
                     token = parts[0]
                     label = parts[1]
-                    
+                    orig_label = label
                     # 3. 将0标签转换为O
                     if label == '0':
+                        logger.info(f"0标签转O: 原始行='{raw_line}' -> 修正后='{token}\tO'")
                         label = 'O'
-                        logger.info(f"将0标签转换为O: {token}")
-                    
                     # 4. 处理缺少前缀的标签
                     if not label.startswith('B-') and not label.startswith('I-') and not label.startswith('O'):
+                        logger.info(f"缺少前缀标签加B-: 原始行='{raw_line}' -> 修正后='{token}\tB-{label}'")
                         label = f"B-{label}"
-                        logger.info(f"为缺少前缀的标签添加B-: {token} -> {label}")
-                    
-                    # 5. 处理不匹配的I标签（前面没有B或I标签时，改为B标签）
+                    # 5. 处理不匹配的I标签（前面没有B或I标签或实体类型不一致时，改为B标签）
                     if label.startswith('I-'):
                         entity_type = label[2:]
                         should_convert = False
-                        
                         if len(processed_sentence) == 0:
-                            # 第一个标签就是I标签，需要转换
                             should_convert = True
                         else:
                             prev_line = processed_sentence[-1].strip()
@@ -157,87 +130,94 @@ class DataManager:
                                 if len(prev_parts) >= 2:
                                     prev_label = prev_parts[1]
                                     if prev_label.startswith('B-') or prev_label.startswith('I-'):
-                                        # 前一行是B或I标签，检查实体类型是否一致
                                         prev_entity_type = prev_label[2:]
                                         if prev_entity_type != entity_type:
-                                            # 实体类型不一致，需要转换
                                             should_convert = True
                                     else:
-                                        # 前一行不是B或I标签，需要转换
                                         should_convert = True
-                        
                         if should_convert:
+                            logger.info(f"I标签不连续或实体类型不一致转B-: 原始行='{raw_line}' -> 修正后='{token}\tB-{entity_type}'")
                             label = f"B-{entity_type}"
-                            logger.info(f"将不匹配的I标签改为B标签: {token} -> {label}")
-                    
                     processed_sentence.append(f"{token}\t{label}")
                 else:
-                    # 其他情况，保持原样
                     processed_sentence.append(line)
-            
             return processed_sentence
-        
         with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line == '':
-                    # 空行表示句子结束，处理当前句子
                     if current_sentence_lines:
                         processed_sentence = process_sentence_lines(current_sentence_lines)
                         processed_lines.extend(processed_sentence)
-                        processed_lines.append('')  # 添加空行分隔
+                        processed_lines.append('')
                         current_sentence_lines = []
                 else:
                     current_sentence_lines.append(line)
-            
-            # 处理最后一个句子
             if current_sentence_lines:
                 processed_sentence = process_sentence_lines(current_sentence_lines)
                 processed_lines.extend(processed_sentence)
-        
         return '\n'.join(processed_lines)
+
+    def fix_and_overwrite_conll_file(self, file_path: str) -> str:
+        """
+        修正CoNLL文件格式并原子性覆盖原文件，保留.bak备份。
+        返回修正后的内容字符串。
+        """
+        import os
+        import shutil
+        logger.info(f"[fix_and_overwrite_conll_file] 开始修正并备份: {file_path}")
+        # 1. 读取并修正
+        fixed_content = self._preprocess_conll_format(file_path)
+        bak_path = file_path + ".bak"
+        # 2. 写入.bak文件
+        with open(bak_path, 'w', encoding='utf-8') as f:
+            f.write(fixed_content)
+        logger.info(f"[fix_and_overwrite_conll_file] 修正内容已写入备份: {bak_path}")
+        # 3. 校验（尝试重新解析，确保无格式错误）
+        try:
+            # 只做简单校验：能否正常解析为token-label对
+            for line in fixed_content.split('\n'):
+                if line.strip() == '':
+                    continue
+                parts = line.split('\t')
+                if len(parts) < 2:
+                    raise ValueError(f"修正后仍有格式错误: {line}")
+        except Exception as e:
+            logger.error(f"[fix_and_overwrite_conll_file] 校验失败，保留.bak: {e}")
+            raise
+        # 4. 原子性覆盖原文件
+        try:
+            os.replace(bak_path, file_path)
+            logger.info(f"[fix_and_overwrite_conll_file] 已原子性覆盖原文件: {file_path}")
+        except Exception as e:
+            logger.error(f"[fix_and_overwrite_conll_file] 覆盖原文件失败: {e}")
+            raise
+        return fixed_content
 
     def load_slot_data(self, file_path: str) -> Tuple[List[List[str]], List[List[str]]]:
         """
         加载槽位填充数据
-        
-        Args:
-            file_path: CoNLL文件路径
-            
-        Returns:
-            (sentences, labels) 句子列表和标签列表的元组
-            
-        Raises:
-            FileNotFoundError: 文件不存在
-            ValueError: 文件格式错误或标签格式错误
         """
         logger.info(f"加载槽位填充数据: {file_path}")
-        
-        # 文件存在性检查
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"文件不存在: {file_path}")
-        
-        # CoNLL格式预处理
-        processed_content = self._preprocess_conll_format(file_path)
-        
-        # CoNLL文件解析
+        # 修正并覆盖原文件，获取修正后的内容
+        processed_content = self.fix_and_overwrite_conll_file(file_path)
+        # 后续解析逻辑保持不变
         sentences = []
         labels = []
         current_sentence = []
         current_labels = []
-        
         try:
             for line in processed_content.split('\n'):
                 line = line.strip()
                 if line == '':
-                    # 空行表示句子结束
                     if current_sentence:
                         sentences.append(current_sentence)
                         labels.append(current_labels)
                         current_sentence = []
                         current_labels = []
                 else:
-                    # 解析token和label
                     parts = line.split('\t')
                     if len(parts) >= 2:
                         token = parts[0]
@@ -246,24 +226,14 @@ class DataManager:
                         current_labels.append(label)
                     else:
                         raise ValueError(f"CoNLL格式错误: {line}")
-            
-            # 处理最后一个句子
             if current_sentence:
                 sentences.append(current_sentence)
                 labels.append(current_labels)
-        
         except Exception as e:
             raise ValueError(f"CoNLL文件解析失败: {e}")
-        
-        # 数据验证
         self._validate_slot_data(sentences, labels)
-        
-        # 数据清洗
         cleaned_sentences, cleaned_labels = self._clean_slot_data(sentences, labels)
-        
-        # 保存到实例变量
         self.slot_data = (cleaned_sentences, cleaned_labels)
-        
         return cleaned_sentences, cleaned_labels
     
     def _clean_intent_data(self, df: pd.DataFrame) -> pd.DataFrame:

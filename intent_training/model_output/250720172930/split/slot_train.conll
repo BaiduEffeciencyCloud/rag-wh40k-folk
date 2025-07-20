@@ -64,7 +64,7 @@ AP	B-ATTR
 装备	B-ACTION
 死亡纺织者	B-WEAPON
 （	O
-Death Spinner	O
+Death	B-Spinner
 ）	O
 ？	O
 

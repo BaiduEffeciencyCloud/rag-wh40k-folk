@@ -2,6 +2,17 @@ import os
 from datetime import datetime
 import shutil
 from typing import List, Dict
+import yaml
+import json
+import pandas as pd
+from intent_training.data.data_manager import DataManager
+from intent_training.feature.feature_engineering import IntentFeatureExtractor
+from intent_training.model.intent_classifier import IntentClassifier
+from intent_training.model.sequence_slot_filler import SequenceSlotFiller
+import joblib
+import argparse
+import sys
+import logging
 
 class IntentTraining:
     def __init__(self, model_output_root, raw_dir, config_path):
@@ -198,7 +209,6 @@ class IntentTraining:
         """
         初始化pipeline日志，日志文件与归档目录同级，便于归档和溯源。
         """
-        import logging
         os.makedirs(self.archive_dir, exist_ok=True)
         log_path = os.path.join(self.archive_dir, "pipeline.log")
         self.logger = logging.getLogger(f"pipeline_{self.ts}")
@@ -226,108 +236,128 @@ class IntentTraining:
         5. 归档所有阶段产物
         日志文件 pipeline.log 会记录每一步归档和异常。
         """
-        import yaml
-        import json
-        import pandas as pd
-        from intent_training.data.data_manager import DataManager
-        from intent_training.feature.feature_engineering import IntentFeatureExtractor
-        from intent_training.model.intent_classifier import IntentClassifier
-        from intent_training.model.sequence_slot_filler import SequenceSlotFiller
-        import joblib
 
+
+        self.logger.info("[pipeline] 开始执行 run() 主流程")
         # 1. 加载配置
         try:
+            self.logger.info("[pipeline] 加载配置阶段开始")
             with open(self.config_path, "r", encoding="utf-8") as f:
                 config = yaml.safe_load(f)
+            self.logger.info(f"[pipeline] 加载配置完成: {self.config_path}")
         except FileNotFoundError:
             self.logger.error(f"配置文件不存在: {self.config_path}")
             return
-        self.logger.info(f"[pipeline] 加载配置完成: {self.config_path}")
+        except Exception as e:
+            self.logger.error(f"加载配置异常: {e}")
+            return
 
         # 2. 数据加载与清洗
-        data_manager = DataManager(config)
-        intent_file = config.get('data', {}).get('intent_file', 'intent_sample.csv')
-        slot_file = config.get('data', {}).get('slot_file', 'slot_sample.conll')
-        intent_path = os.path.join(self.raw_dir, intent_file)
-        slot_path = os.path.join(self.raw_dir, slot_file)
         try:
+            self.logger.info("[pipeline] 数据加载与清洗阶段开始")
+            data_manager = DataManager(config)
+            intent_file = config.get('data', {}).get('intent_file', 'intent_sample.csv')
+            slot_file = config.get('data', {}).get('slot_file', 'slot_sample.conll')
+            intent_path = os.path.join(self.raw_dir, intent_file)
+            slot_path = os.path.join(self.raw_dir, slot_file)
             intent_df = data_manager.load_intent_data(intent_path)
             slot_sentences, slot_labels = data_manager.load_slot_data(slot_path)
+            self.logger.info(f"[pipeline] 数据加载与清洗完成: intent={intent_path}, slot={slot_path}")
         except FileNotFoundError as e:
             self.logger.error(str(e))
+            return
+        except Exception as e:
+            self.logger.error(f"数据加载与清洗异常: {e}")
             return
         self.archive_raw()
 
         # 3. 数据切分
-        split_result = data_manager.split_data('both')
-        split_dir = self.dirs['split']
-        os.makedirs(split_dir, exist_ok=True)
-        for name in ['train', 'val', 'test']:
-            X, y = split_result['intent'][name]
-            df = pd.DataFrame({'query': X, 'intent': y})
-            df.to_csv(os.path.join(split_dir, f"intent_{name}.csv"), index=False)
-        for name in ['train', 'val', 'test']:
-            sents, labels = split_result['slot'][name]
-            with open(os.path.join(split_dir, f"slot_{name}.conll"), "w", encoding="utf-8") as f:
-                for sent, label_seq in zip(sents, labels):
-                    for w, l in zip(sent, label_seq):
-                        f.write(f"{w}\t{l}\n")
-                    f.write("\n")
+        try:
+            self.logger.info("[pipeline] 数据切分阶段开始")
+            split_result = data_manager.split_data('both')
+            split_dir = self.dirs['split']
+            os.makedirs(split_dir, exist_ok=True)
+            for name in ['train', 'val', 'test']:
+                X, y = split_result['intent'][name]
+                df = pd.DataFrame({'query': X, 'intent': y})
+                df.to_csv(os.path.join(split_dir, f"intent_{name}.csv"), index=False)
+            for name in ['train', 'val', 'test']:
+                sents, labels = split_result['slot'][name]
+                with open(os.path.join(split_dir, f"slot_{name}.conll"), "w", encoding="utf-8") as f:
+                    for wsent, wlabel_seq in zip(sents, labels):
+                        for w, l in zip(wsent, wlabel_seq):
+                            f.write(f"{w}\t{l}\n")
+                        f.write("\n")
+            self.logger.info("[pipeline] 数据切分完成")
+        except Exception as e:
+            self.logger.error(f"数据切分异常: {e}")
+            return
         self.archive_split()
 
         # 4. 特征工程
-        feature_dir = self.dirs['feature']
-        os.makedirs(feature_dir, exist_ok=True)
-        intent_feat = IntentFeatureExtractor(config)
-        X_train = split_result['intent']['train'][0]
-        intent_feat.fit(X_train)
-        intent_tfidf_name = config.get('feature', {}).get('intent_tfidf', 'intent_tfidf.pkl')
-        joblib.dump(intent_feat.tfidf_vectorizer, os.path.join(feature_dir, intent_tfidf_name))
+        try:
+            self.logger.info("[pipeline] 特征工程阶段开始")
+            feature_dir = self.dirs['feature']
+            os.makedirs(feature_dir, exist_ok=True)
+            intent_feat = IntentFeatureExtractor(config)
+            X_train = split_result['intent']['train'][0]
+            intent_feat.fit(X_train)
+            intent_tfidf_name = config.get('feature', {}).get('intent_tfidf', 'intent_tfidf.pkl')
+            joblib.dump(intent_feat.tfidf_vectorizer, os.path.join(feature_dir, intent_tfidf_name))
+            self.logger.info("[pipeline] 特征工程完成")
+        except Exception as e:
+            self.logger.error(f"特征工程异常: {e}")
+            return
         self.archive_feature()
 
         # 5. 模型训练
-        # 重要：手动创建model目录，确保后续模型保存操作不会因目录不存在而失败
-        # 所有模型的save_model()方法都依赖此目录已存在，不负责创建目录
-        model_dir = self.dirs['model']
-        os.makedirs(model_dir, exist_ok=True)
-        y_train = split_result['intent']['train'][1]
-        X_train_vec = intent_feat.transform(X_train)
-        intent_clf = IntentClassifier(config)
-        intent_clf.fit(X_train_vec, y_train)
-        intent_clf_name = config.get('model', {}).get('intent_classifier', 'intent_classifier.pkl')
-        intent_clf.save_model(os.path.join(model_dir, intent_clf_name))
-        
-        # 槽位填充器训练 - 使用意图分类器预测真实意图
-        slot_train_sents, slot_train_labels = split_result['slot']['train']
-        slotfiller = SequenceSlotFiller(config)
-        slot_train_data = []
-        
-        for sent, label_seq in zip(slot_train_sents, slot_train_labels):
-            query = "".join(sent)
-            
-            # 使用意图分类器预测意图
-            query_vec = intent_feat.transform([query])
-            predicted_intent = intent_clf.predict(query_vec)[0]
-            
-            # 从CoNLL标签中提取槽位信息
-            extracted_slots = self._extract_slots_from_conll(sent, label_seq)
-            
-            slot_train_data.append({
-                "query": query, 
-                "intent": predicted_intent,  # 使用预测的意图
-                "slots": extracted_slots
-            })
-        
-        slotfiller.train(slot_train_data)
-        slot_filler_name = config.get('model', {}).get('sequence_slot_filler', 'sequence_slot_filler.pkl')
-        slotfiller.save_model(os.path.join(model_dir, slot_filler_name))
+        try:
+            self.logger.info("[pipeline] 模型训练阶段开始")
+            model_dir = self.dirs['model']
+            os.makedirs(model_dir, exist_ok=True)
+            y_train = split_result['intent']['train'][1]
+            X_train_vec = intent_feat.transform(X_train)
+            intent_clf = IntentClassifier(config)
+            intent_clf.fit(X_train_vec, y_train)
+            intent_clf_name = config.get('model', {}).get('intent_classifier', 'intent_classifier.pkl')
+            intent_clf.save_model(os.path.join(model_dir, intent_clf_name))
+            self.logger.info(f"[pipeline] 意图分类器训练完成: {intent_clf_name}")
+            # 槽位填充器训练 - 使用意图分类器预测真实意图
+            slot_train_sents, slot_train_labels = split_result['slot']['train']
+            slotfiller = SequenceSlotFiller(config)
+            slot_train_data = []
+            for sent, label_seq in zip(slot_train_sents, slot_train_labels):
+                query = "".join(sent)
+                query_vec = intent_feat.transform([query])
+                predicted_intent = intent_clf.predict(query_vec)[0]
+                extracted_slots = self._extract_slots_from_conll(sent, label_seq)
+                slot_train_data.append({
+                    "query": query, 
+                    "intent": predicted_intent,  # 使用预测的意图
+                    "slots": extracted_slots
+                })
+            slotfiller.train(slot_train_data)
+            slot_filler_name = config.get('model', {}).get('sequence_slot_filler', 'sequence_slot_filler.pkl')
+            slotfiller.save_model(os.path.join(model_dir, slot_filler_name))
+            self.logger.info(f"[pipeline] 槽位填充器训练完成: {slot_filler_name}")
+        except Exception as e:
+            self.logger.error(f"模型训练异常: {e}")
+            return
         self.archive_model()
 
         # 6. 配置归档
-        self.logger.info("[pipeline] 归档配置文件阶段开始")
-        self.archive_config()
+        try:
+            self.logger.info("[pipeline] 配置归档阶段开始")
+            self.archive_config()
+            self.logger.info("[pipeline] 配置归档完成")
+        except Exception as e:
+            self.logger.error(f"配置归档异常: {e}")
         # 保证report目录被创建
-        self.archive_report()
+        try:
+            self.archive_report()
+            self.logger.info("[pipeline] 评估报告归档完成")
+        except Exception as e:
+            self.logger.error(f"评估报告归档异常: {e}")
         self.logger.info("[pipeline] 归档主流程结束")
         for handler in self.logger.handlers:
             handler.flush()
@@ -336,8 +366,22 @@ class IntentTraining:
 
 
 if __name__ == "__main__":
-    import argparse
-    import sys
+    # ========== 全局日志配置 ===========
+    # 归档目录与日志文件名动态生成
+    ts = datetime.now().strftime("%y%m%d%H%M%S")
+    model_output_root = "intent_training/model_output"
+    archive_dir = os.path.join(model_output_root, ts)
+    os.makedirs(archive_dir, exist_ok=True)
+    log_path = os.path.join(archive_dir, "pipeline.log")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[
+            logging.FileHandler(log_path, encoding="utf-8"),
+            logging.StreamHandler()
+        ]
+    )
+    # ========== 解析参数与主流程 ===========
     
     parser = argparse.ArgumentParser(description="意图识别训练pipeline执行入口")
     parser.add_argument("--raw", "-r", default="intent_training/data/raw", 

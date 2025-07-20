@@ -1,10 +1,10 @@
 import os
 import json
 from typing import List
-from .storage_interface import StorageInterface
+from storage.storage_interface import StorageInterface
 
 # 获取项目根目录（假设本文件在 dataupload/storage/ 下）
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW_CHUNKS_FILE = "raw_chunks.json"
 RAW_FOLDER = os.path.join(PROJECT_ROOT, "raw_chunk")
 
@@ -46,3 +46,12 @@ class RawChunkStorage(StorageInterface):
             return []
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
+
+    def exists(self, path: str, *args, **kwargs) -> bool:
+        """判断指定路径的文件是否存在"""
+        return os.path.exists(path)
+
+    def delete(self, path: str, *args, **kwargs) -> None:
+        """删除指定路径的文件"""
+        if os.path.exists(path):
+            os.remove(path)

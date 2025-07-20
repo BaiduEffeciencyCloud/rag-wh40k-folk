@@ -1,0 +1,22 @@
+query,Unnamed: 1,Unnamed: 2
+风暴战团中，暴风战士的M值和天启战士的M值相比，哪个更高？,Compare,Query
+钢铁守护者能装备的近战武器中，哪种武器的AP值最高？,Compare,List
+狂怒之拳和毁灭之锤哪个武器的S值更高？,Compare,Query
+破晓之刃和夜影之爪哪个武器的AP值更高？,Compare,Query
+雷霆坦克和毁灭坦克谁的T值更高？,Compare,Query
+审判骑士能使用哪些重型武器？,List,Query
+审判骑士的等离子加农炮和光束喷射器哪个S值更高？,Compare,Query
+铁血骑士的等离子剑AP值和星辰骑士的能量斧AP值相比哪个更高？,Compare,Query
+黑曜星舰中，哪种武器具有最高射程？,Compare,List
+覆灭飞龙和毁灭机甲谁的M值更高？,Compare,Query
+血色收割者投掷飞斧的S值和掠夺者投掷长矛的S值哪个更高？,Compare,Query
+雷光战士的重型等离子枪AP值和毁灭力爆破枪的AP值哪个更高？,Compare,Query
+利刃战士的能量剑S值和光热斩斧的S值哪个更高？,Compare,Query
+"在暗夜魔女能装备的曲射武器里,那种武器射程最远",Compare,List
+暗夜魔女的爆裂箭和火焰箭哪个射程更远？,Compare,Query
+星际护卫的重型爆能枪AP值和激光步枪AP值哪个更高？,Compare,Query
+泰伦虫后使用的毒液爪S值和王爪的S值哪个更高？,Compare,Query
+骑士领主的雷霆战锤AP值和振荡长矛AP值哪个更高？,Compare,Query
+机械军团的所有重型武器有哪些？,List,Query
+机械军团的震荡榴弹和塑能火箭哪个AP值更高？,Compare,Query
+圣殿驱逐舰的等离子炮S值和电磁炮S值哪个更高？,Compare,Query

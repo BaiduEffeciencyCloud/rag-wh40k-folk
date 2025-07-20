@@ -16,7 +16,7 @@ from dataupload.data_vector_v3 import SemanticDocumentChunker, save_chunks_to_te
 
 from dataupload.knowledge_graph_manager import KnowledgeGraphManager
 from config import get_pinecone_index, get_embedding_model
-from dataupload.storage.storage_factory import StorageFactory
+from storage.storage_factory import StorageFactory
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

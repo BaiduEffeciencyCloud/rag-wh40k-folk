@@ -15,9 +15,54 @@ from sklearn.model_selection import train_test_split
 
 from .bio_annotator import BIOAnnotator
 from .crf_feature_extractor import CRFFeatureExtractor
-from .slot_filler import Slot, SlotFillingResult
 
 logger = logging.getLogger(__name__)
+
+
+class Slot:
+    """槽位实体类"""
+    
+    def __init__(self, name: str, value: str, start_pos: int, end_pos: int, confidence: float):
+        """
+        初始化槽位
+        
+        Args:
+            name: 槽位名称
+            value: 槽位值
+            start_pos: 开始位置
+            end_pos: 结束位置
+            confidence: 置信度
+        """
+        self.name = name
+        self.value = value
+        self.start_pos = start_pos
+        self.end_pos = end_pos
+        self.confidence = confidence
+    
+    def __repr__(self):
+        return f"Slot(name='{self.name}', value='{self.value}', pos=({self.start_pos},{self.end_pos}), conf={self.confidence:.2f})"
+
+
+class SlotFillingResult:
+    """槽位填充结果类"""
+    
+    def __init__(self, intent: str, slots: Dict[str, Slot], confidence: float, raw_query: str):
+        """
+        初始化槽位填充结果
+        
+        Args:
+            intent: 意图
+            slots: 槽位字典
+            confidence: 整体置信度
+            raw_query: 原始查询
+        """
+        self.intent = intent
+        self.slots = slots
+        self.confidence = confidence
+        self.raw_query = raw_query
+    
+    def __repr__(self):
+        return f"SlotFillingResult(intent='{self.intent}', slots={len(self.slots)}, conf={self.confidence:.2f})"
 
 
 class SequenceSlotFiller:
@@ -312,23 +357,21 @@ class SequenceSlotFiller:
         
         return metrics
     
-    def save_model(self, model_dir: str):
+    def save_model(self, file_path: str):
         """
         保存模型
         
         Args:
-            model_dir: 模型保存目录
+            file_path: 模型保存路径
         """
         if not self.is_trained:
-            raise ValueError("模型尚未训练")
+            raise ValueError("模型尚未训练，无法保存")
         
-        os.makedirs(model_dir, exist_ok=True)
+        # 直接保存CRF模型到指定路径（目录已由pipeline创建）
+        joblib.dump(self.crf, file_path)
         
-        # 保存CRF模型
-        crf_path = os.path.join(model_dir, 'crf_model.pkl')
-        joblib.dump(self.crf, crf_path)
-        
-        # 保存配置和状态
+        # 保存模型信息到同目录下的JSON文件
+        model_dir = os.path.dirname(file_path)
         model_info = {
             'is_trained': self.is_trained,
             'label_set': list(self.label_set),
@@ -336,11 +379,11 @@ class SequenceSlotFiller:
             'config': self.config
         }
         
-        info_path = os.path.join(model_dir, 'model_info.json')
+        info_path = os.path.join(model_dir, 'sequence_slot_filler_info.json')
         with open(info_path, 'w', encoding='utf-8') as f:
             json.dump(model_info, f, ensure_ascii=False, indent=2)
         
-        logger.info(f"序列槽位填充器模型已保存到: {model_dir}")
+        logger.info(f"序列槽位填充器模型已保存到: {file_path}")
     
     def load_model(self, model_dir: str):
         """

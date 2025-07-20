@@ -1,3 +1,23 @@
+"""
+不确定性检测器模块
+
+重要说明：
+此模块在模型训练阶段不使用，专门为后续qProcessor在线意图识别服务设计。
+
+功能说明：
+1. 检测模型预测的不确定性，识别低置信度的预测结果
+2. 为qProcessor提供决策支持，决定是否需要人工审核
+3. 支持多种不确定性检测方法：熵、置信度、边距等
+4. 提供查询缓存功能，管理需要人工审核的查询
+
+使用场景：
+- qProcessor在线预测时，对每个查询进行不确定性评估
+- 当不确定性超过阈值时，将查询加入审核队列
+- 支持批量审核和自动信任机制
+
+注意：此模块不参与模型训练，仅在推理阶段使用。
+"""
+
 import numpy as np
 from typing import Dict, List, Any, Optional
 import logging
@@ -6,7 +26,25 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 class UncertaintyDetector:
-    """不确定性检测器"""
+    """
+    不确定性检测器
+    
+    重要说明：
+    此模块在模型训练阶段不使用，专门为后续qProcessor在线意图识别服务设计。
+    
+    主要功能：
+    1. 检测模型预测的不确定性，识别低置信度的预测结果
+    2. 为qProcessor提供决策支持，决定是否需要人工审核
+    3. 支持多种不确定性检测方法：熵、置信度、边距等
+    4. 提供查询缓存功能，管理需要人工审核的查询
+    
+    使用场景：
+    - qProcessor在线预测时，对每个查询进行不确定性评估
+    - 当不确定性超过阈值时，将查询加入审核队列
+    - 支持批量审核和自动信任机制
+    
+    注意：此模块不参与模型训练，仅在推理阶段使用。
+    """
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config

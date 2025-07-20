@@ -64,6 +64,139 @@ class DataManager:
         
         return cleaned_df
     
+    def _preprocess_conll_format(self, file_path: str) -> str:
+        """
+        CoNLL格式预处理：自动修正各种格式错误
+        
+        Args:
+            file_path: 原始CoNLL文件路径
+            
+        Returns:
+            预处理后的文件内容字符串
+        """
+        logger.info(f"开始CoNLL格式预处理: {file_path}")
+        
+        processed_lines = []
+        current_sentence_lines = []
+        
+        def process_sentence_lines(sentence_lines):
+            """处理单个句子的行"""
+            if not sentence_lines:
+                return []
+            
+            processed_sentence = []
+            for i, line in enumerate(sentence_lines):
+                line = line.strip()
+                if line == '':
+                    continue
+                
+                # 1. 处理只有label没有token的行
+                # 检查是否只有标签没有token（如：B-UNIT_TYPE）
+                parts_by_space = line.split()
+                if len(parts_by_space) == 1:
+                    # 只有一部分，需要判断是token还是label
+                    word = parts_by_space[0]
+                    if word.startswith('B-') or word.startswith('I-') or word.startswith('O'):
+                        # 这是标签，但没有对应的token，删除这一行
+                        logger.warning(f"删除只有label没有token的行: {line}")
+                        continue
+                    # 如果是以特定关键词开头的描述性文本，也删除
+                    elif word in ['只有label没有token', 'B-UNIT_TYPE']:
+                        logger.warning(f"删除描述性文本行: {line}")
+                        continue
+                    # 其他情况：可能是token，需要添加O标签
+                    else:
+                        # 这是token，但没有label，添加O标签
+                        processed_sentence.append(f"{word}\tO")
+                        logger.info(f"为只有token的行添加O标签: {word}")
+                        continue
+                
+                # 2. 统一分隔符：将多个空格转换为制表符
+                if '\t' in line:
+                    # 已经有制表符，直接使用
+                    parts = line.split('\t')
+                else:
+                    # 使用空格分割
+                    parts = line.split()
+                
+                if len(parts) == 0:
+                    # 空行
+                    continue
+                elif len(parts) == 1:
+                    # 只有token没有label
+                    token = parts[0]
+                    processed_sentence.append(f"{token}\tO")
+                    logger.info(f"为只有token的行添加O标签: {token}")
+                elif len(parts) >= 2:
+                    # 有token和label
+                    token = parts[0]
+                    label = parts[1]
+                    
+                    # 3. 将0标签转换为O
+                    if label == '0':
+                        label = 'O'
+                        logger.info(f"将0标签转换为O: {token}")
+                    
+                    # 4. 处理缺少前缀的标签
+                    if not label.startswith('B-') and not label.startswith('I-') and not label.startswith('O'):
+                        label = f"B-{label}"
+                        logger.info(f"为缺少前缀的标签添加B-: {token} -> {label}")
+                    
+                    # 5. 处理不匹配的I标签（前面没有B或I标签时，改为B标签）
+                    if label.startswith('I-'):
+                        entity_type = label[2:]
+                        should_convert = False
+                        
+                        if len(processed_sentence) == 0:
+                            # 第一个标签就是I标签，需要转换
+                            should_convert = True
+                        else:
+                            prev_line = processed_sentence[-1].strip()
+                            if prev_line:
+                                prev_parts = prev_line.split('\t')
+                                if len(prev_parts) >= 2:
+                                    prev_label = prev_parts[1]
+                                    if prev_label.startswith('B-') or prev_label.startswith('I-'):
+                                        # 前一行是B或I标签，检查实体类型是否一致
+                                        prev_entity_type = prev_label[2:]
+                                        if prev_entity_type != entity_type:
+                                            # 实体类型不一致，需要转换
+                                            should_convert = True
+                                    else:
+                                        # 前一行不是B或I标签，需要转换
+                                        should_convert = True
+                        
+                        if should_convert:
+                            label = f"B-{entity_type}"
+                            logger.info(f"将不匹配的I标签改为B标签: {token} -> {label}")
+                    
+                    processed_sentence.append(f"{token}\t{label}")
+                else:
+                    # 其他情况，保持原样
+                    processed_sentence.append(line)
+            
+            return processed_sentence
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line == '':
+                    # 空行表示句子结束，处理当前句子
+                    if current_sentence_lines:
+                        processed_sentence = process_sentence_lines(current_sentence_lines)
+                        processed_lines.extend(processed_sentence)
+                        processed_lines.append('')  # 添加空行分隔
+                        current_sentence_lines = []
+                else:
+                    current_sentence_lines.append(line)
+            
+            # 处理最后一个句子
+            if current_sentence_lines:
+                processed_sentence = process_sentence_lines(current_sentence_lines)
+                processed_lines.extend(processed_sentence)
+        
+        return '\n'.join(processed_lines)
+
     def load_slot_data(self, file_path: str) -> Tuple[List[List[str]], List[List[str]]]:
         """
         加载槽位填充数据
@@ -84,6 +217,9 @@ class DataManager:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"文件不存在: {file_path}")
         
+        # CoNLL格式预处理
+        processed_content = self._preprocess_conll_format(file_path)
+        
         # CoNLL文件解析
         sentences = []
         labels = []
@@ -91,26 +227,25 @@ class DataManager:
         current_labels = []
         
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line == '':
-                        # 空行表示句子结束
-                        if current_sentence:
-                            sentences.append(current_sentence)
-                            labels.append(current_labels)
-                            current_sentence = []
-                            current_labels = []
+            for line in processed_content.split('\n'):
+                line = line.strip()
+                if line == '':
+                    # 空行表示句子结束
+                    if current_sentence:
+                        sentences.append(current_sentence)
+                        labels.append(current_labels)
+                        current_sentence = []
+                        current_labels = []
+                else:
+                    # 解析token和label
+                    parts = line.split('\t')
+                    if len(parts) >= 2:
+                        token = parts[0]
+                        label = parts[1]
+                        current_sentence.append(token)
+                        current_labels.append(label)
                     else:
-                        # 解析token和label
-                        parts = line.split('\t')
-                        if len(parts) >= 2:
-                            token = parts[0]
-                            label = parts[1]
-                            current_sentence.append(token)
-                            current_labels.append(label)
-                        else:
-                            raise ValueError(f"CoNLL格式错误: {line}")
+                        raise ValueError(f"CoNLL格式错误: {line}")
             
             # 处理最后一个句子
             if current_sentence:

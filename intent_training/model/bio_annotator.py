@@ -33,7 +33,9 @@ class BIOAnnotator:
         bio_labels = ['O'] * len(tokens)
         
         # 为每个槽位找到在查询中的位置并标注
-        for slot_name, slot_value in slots.items():
+        # 按槽位名称排序，确保处理顺序一致
+        for slot_name in sorted(slots.keys()):
+            slot_value = slots[slot_name]
             if not slot_value:
                 continue
                 
@@ -41,6 +43,10 @@ class BIOAnnotator:
             positions = self._find_slot_positions(query, slot_value)
             
             for start_pos, end_pos in positions:
+                # 检查位置是否已被标注
+                if any(bio_labels[pos] != 'O' for pos in range(start_pos, min(end_pos, len(bio_labels)))):
+                    continue  # 跳过已被标注的位置
+                
                 # 标注B-{slot_name} (开始)
                 if start_pos < len(bio_labels):
                     bio_labels[start_pos] = f"B-{slot_name}"

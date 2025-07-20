@@ -162,8 +162,8 @@ class CRFFeatureExtractor:
         
         # 词形特征
         features['word_shape'] = self._get_word_shape(token)
-        features['word_suffix'] = token[-3:] if len(token) >= 3 else token
-        features['word_prefix'] = token[:3] if len(token) >= 3 else token
+        features['word_suffix'] = token[-2:] if len(token) >= 2 else token
+        features['word_prefix'] = token[:2] if len(token) >= 2 else token
         
         # 长度特征
         features['length_1'] = len(token) == 1
@@ -196,6 +196,8 @@ class CRFFeatureExtractor:
                 shape.append('x')
             elif char.isdigit():
                 shape.append('d')
+            elif '\u4e00' <= char <= '\u9fff':  # 中文字符
+                shape.append('x')
             else:
                 shape.append(char)
         return ''.join(shape)

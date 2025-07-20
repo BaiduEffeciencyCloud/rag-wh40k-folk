@@ -232,7 +232,7 @@ class IntentTraining:
         from intent_training.data.data_manager import DataManager
         from intent_training.feature.feature_engineering import IntentFeatureExtractor
         from intent_training.model.intent_classifier import IntentClassifier
-        from intent_training.model.slot_filler import SlotFiller
+        from intent_training.model.sequence_slot_filler import SequenceSlotFiller
         import joblib
 
         # 1. 加载配置
@@ -286,6 +286,8 @@ class IntentTraining:
         self.archive_feature()
 
         # 5. 模型训练
+        # 重要：手动创建model目录，确保后续模型保存操作不会因目录不存在而失败
+        # 所有模型的save_model()方法都依赖此目录已存在，不负责创建目录
         model_dir = self.dirs['model']
         os.makedirs(model_dir, exist_ok=True)
         y_train = split_result['intent']['train'][1]
@@ -297,7 +299,7 @@ class IntentTraining:
         
         # 槽位填充器训练 - 使用意图分类器预测真实意图
         slot_train_sents, slot_train_labels = split_result['slot']['train']
-        slotfiller = SlotFiller(config)
+        slotfiller = SequenceSlotFiller(config)
         slot_train_data = []
         
         for sent, label_seq in zip(slot_train_sents, slot_train_labels):
@@ -317,7 +319,8 @@ class IntentTraining:
             })
         
         slotfiller.train(slot_train_data)
-        slotfiller.save_model(model_dir)
+        slot_filler_name = config.get('model', {}).get('sequence_slot_filler', 'sequence_slot_filler.pkl')
+        slotfiller.save_model(os.path.join(model_dir, slot_filler_name))
         self.archive_model()
 
         # 6. 配置归档

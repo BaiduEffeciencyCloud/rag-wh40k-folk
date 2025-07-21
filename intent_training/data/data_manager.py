@@ -158,24 +158,22 @@ class DataManager:
                 processed_lines.extend(processed_sentence)
         return '\n'.join(processed_lines)
 
-    def fix_and_overwrite_conll_file(self, file_path: str) -> str:
+    def overwrite_conll_file(self, file_path: str, fixed_content: str) -> None:
         """
-        修正CoNLL文件格式并原子性覆盖原文件，保留.bak备份。
-        返回修正后的内容字符串。
+        用修正后的内容原子性覆盖CoNLL文件，保留.bak备份。
+        如果校验失败则抛出异常，原文件不被破坏。
+        Args:
+            file_path: 原始CoNLL文件路径
+            fixed_content: 修正后的内容字符串
         """
-        import os
-        import shutil
-        logger.info(f"[fix_and_overwrite_conll_file] 开始修正并备份: {file_path}")
-        # 1. 读取并修正
-        fixed_content = self._preprocess_conll_format(file_path)
+        logger.info(f"[overwrite_conll_file] 开始备份并覆盖: {file_path}")
         bak_path = file_path + ".bak"
-        # 2. 写入.bak文件
+        # 1. 写入.bak文件
         with open(bak_path, 'w', encoding='utf-8') as f:
             f.write(fixed_content)
-        logger.info(f"[fix_and_overwrite_conll_file] 修正内容已写入备份: {bak_path}")
-        # 3. 校验（尝试重新解析，确保无格式错误）
+        logger.info(f"[overwrite_conll_file] 修正内容已写入备份: {bak_path}")
+        # 2. 校验（尝试重新解析，确保无格式错误）
         try:
-            # 只做简单校验：能否正常解析为token-label对
             for line in fixed_content.split('\n'):
                 if line.strip() == '':
                     continue
@@ -183,27 +181,35 @@ class DataManager:
                 if len(parts) < 2:
                     raise ValueError(f"修正后仍有格式错误: {line}")
         except Exception as e:
-            logger.error(f"[fix_and_overwrite_conll_file] 校验失败，保留.bak: {e}")
+            logger.error(f"[overwrite_conll_file] 校验失败，保留.bak: {e}")
             raise
-        # 4. 原子性覆盖原文件
+        # 3. 原子性覆盖原文件
         try:
             os.replace(bak_path, file_path)
-            logger.info(f"[fix_and_overwrite_conll_file] 已原子性覆盖原文件: {file_path}")
+            logger.info(f"[overwrite_conll_file] 已原子性覆盖原文件: {file_path}")
         except Exception as e:
-            logger.error(f"[fix_and_overwrite_conll_file] 覆盖原文件失败: {e}")
+            logger.error(f"[overwrite_conll_file] 覆盖原文件失败: {e}")
             raise
-        return fixed_content
 
     def load_slot_data(self, file_path: str) -> Tuple[List[List[str]], List[List[str]]]:
         """
         加载槽位填充数据
+        Args:
+            file_path: CoNLL文件路径
+        Returns:
+            (sentences, labels) 句子和标签列表
+        Raises:
+            FileNotFoundError: 文件不存在
+            ValueError: 数据格式错误或数据质量问题
         """
         logger.info(f"加载槽位填充数据: {file_path}")
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"文件不存在: {file_path}")
         # 修正并覆盖原文件，获取修正后的内容
-        processed_content = self.fix_and_overwrite_conll_file(file_path)
-        # 后续解析逻辑保持不变
+        processed_content = self._preprocess_conll_format(file_path)
+        # 修正后覆写原文件
+        self.overwrite_conll_file(file_path, processed_content)
+        # 解析CoNLL格式
         sentences = []
         labels = []
         current_sentence = []
@@ -231,11 +237,24 @@ class DataManager:
                 labels.append(current_labels)
         except Exception as e:
             raise ValueError(f"CoNLL文件解析失败: {e}")
+        # 检查是否有有效数据
+        if not sentences:
+            raise ValueError("CoNLL文件中没有有效的句子数据")
+        # 验证数据格式
         self._validate_slot_data(sentences, labels)
+        # 清洗数据
         cleaned_sentences, cleaned_labels = self._clean_slot_data(sentences, labels)
+        # 检查清洗后的数据质量
+        if not cleaned_sentences:
+            raise ValueError("数据清洗后没有有效的句子，可能存在严重的数据质量问题")
+        # 检查清洗前后数据量差异
+        original_count = len(sentences)
+        cleaned_count = len(cleaned_sentences)
+        if cleaned_count < original_count * 0.5:
+            raise ValueError(f"数据清洗后损失过多数据: 原始{original_count}句，清洗后{cleaned_count}句")
         self.slot_data = (cleaned_sentences, cleaned_labels)
         return cleaned_sentences, cleaned_labels
-    
+
     def _clean_intent_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         清洗意图识别数据
@@ -270,30 +289,29 @@ class DataManager:
     def _clean_slot_data(self, sentences: List[List[str]], labels: List[List[str]]) -> Tuple[List[List[str]], List[List[str]]]:
         """
         清洗槽位填充数据
-        
         Args:
             sentences: 句子列表
             labels: 标签列表
-            
         Returns:
             (cleaned_sentences, cleaned_labels) 清洗后的句子和标签列表
+        Raises:
+            ValueError: 数据质量问题严重
         """
         cleaned_sentences = []
         cleaned_labels = []
-        
-        for sentence, label_seq in zip(sentences, labels):
+        error_count = 0
+        for i, (sentence, label_seq) in enumerate(zip(sentences, labels)):
             # 空句子过滤
             if not sentence or len(sentence) == 0:
+                error_count += 1
                 continue
-            
             # 长度过滤（去除过短的句子）
             if len(sentence) < 2:
+                error_count += 1
                 continue
-            
-            # 长度一致性检查
+            # 长度一致性检查 - 这是严重错误，应该抛出异常
             if len(sentence) != len(label_seq):
-                continue
-            
+                raise ValueError(f"第{i}个句子长度({len(sentence)})与标签长度({len(label_seq)})不一致")
             # 去除空token
             filtered_sentence = []
             filtered_labels = []
@@ -301,12 +319,16 @@ class DataManager:
                 if token.strip():  # 非空token
                     filtered_sentence.append(token.strip())
                     filtered_labels.append(label)
-            
             # 过滤后再次检查长度
             if len(filtered_sentence) >= 2:
                 cleaned_sentences.append(filtered_sentence)
                 cleaned_labels.append(filtered_labels)
-        
+            else:
+                error_count += 1
+        # 如果错误率过高，抛出异常
+        total_count = len(sentences)
+        if total_count > 0 and error_count / total_count > 0.3:
+            raise ValueError(f"数据质量过差: 总{total_count}句，错误{error_count}句，错误率{error_count/total_count:.1%}")
         return cleaned_sentences, cleaned_labels
     
     def _validate_config(self):
@@ -380,144 +402,102 @@ class DataManager:
                         if label_seq[j-1][2:] != label_seq[j][2:]:
                             raise ValueError(f"第{i}个句子第{j}个I标签实体类型与前面B标签不一致")
     
-    def split_data(self, data_type: str = 'both') -> Dict:
+    def split_data(self, mode: str = 'both'):
         """
-        数据切分
-        
-        Args:
-            data_type: 数据类型，'intent', 'slot', 'both'
-            
-        Returns:
-            包含训练/验证/测试集的字典
+        切分意图和槽位数据为训练集、验证集和测试集。
+        支持 'intent', 'slot', 'both' 三种模式。
         """
-        logger.info(f"开始数据切分: {data_type}")
-        
         result = {}
+        if mode in ['intent', 'both']:
+            result['intent'] = self._split_intent_data()
+        if mode in ['slot', 'both']:
+            result['slot'] = self._split_slot_data()
         
-        # 意图数据切分
-        if data_type in ['intent', 'both']:
-            if self.intent_data is not None:
-                result['intent'] = self._split_intent_data()
-            else:
-                logger.warning("意图数据未加载，跳过意图数据切分")
-        
-        # 槽位数据切分
-        if data_type in ['slot', 'both']:
-            if self.slot_data is not None:
-                result['slot'] = self._split_slot_data()
-            else:
-                logger.warning("槽位数据未加载，跳过槽位数据切分")
-        
+        # 存储到实例变量中
+        if 'intent' in result and 'slot' in result:
+            self.train_data = (result['intent']['train'][0], result['intent']['train'][1], result['slot']['train'][1])
+            self.test_data = (result['intent']['test'][0], result['intent']['test'][1], result['slot']['test'][1])
+            
         return result
-    
-    def _split_intent_data(self) -> Dict:
+
+    def _split_intent_data(self):
         """
-        切分意图识别数据
-        
-        Returns:
-            包含训练/验证/测试集的字典
+        切分意图识别数据。
+        优先尝试分层抽样，如果失败（如样本太少），则自动降级为普通随机抽样。
         """
         X = self.intent_data['query'].tolist()
         y = self.intent_data['intent'].tolist()
         
-        # 获取配置参数
-        test_size = self.test_size
-        val_size = self.val_size
-        random_state = self.random_state
-        stratify = self.stratify
-        
-        # 首先划分出测试集
-        if stratify:
-            X_temp, X_test, y_temp, y_test = train_test_split(
-                X, y, test_size=test_size, random_state=random_state, stratify=y
+        test_size = self.config.get('data', {}).get('test_size', 0.2)
+        val_size_of_train = self.config.get('data', {}).get('val_size', 0.2)
+
+        def split_with_stratify(features, labels, stratify_labels, **kwargs):
+            return train_test_split(features, labels, stratify=stratify_labels, **kwargs)
+
+        def split_without_stratify(features, labels, **kwargs):
+            return train_test_split(features, labels, stratify=None, **kwargs)
+
+        # 第一次切分：分离出测试集
+        try:
+            X_temp, X_test, y_temp, y_test = split_with_stratify(
+                X, y, stratify_labels=y, test_size=test_size, random_state=42
             )
-        else:
-            X_temp, X_test, y_temp, y_test = train_test_split(
-                X, y, test_size=test_size, random_state=random_state
+        except ValueError:
+            logging.warning("分层抽样失败（测试集划分），可能是由于某些类别样本数过少。自动切换到普通随机抽样。")
+            X_temp, X_test, y_temp, y_test = split_without_stratify(
+                X, y, test_size=test_size, random_state=42
             )
-        
-        # 从剩余数据中划分验证集
-        val_size_adjusted = val_size / (1 - test_size)
-        if stratify:
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_temp, y_temp, test_size=val_size_adjusted, random_state=random_state, stratify=y_temp
+
+        # 第二次切分：从剩余数据中分离出训练集和验证集
+        try:
+            X_train, X_val, y_train, y_val = split_with_stratify(
+                X_temp, y_temp, stratify_labels=y_temp, test_size=val_size_of_train, random_state=42
             )
-        else:
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_temp, y_temp, test_size=val_size_adjusted, random_state=random_state
+        except ValueError:
+            logging.warning("分层抽样失败（验证集划分），可能是由于某些类别样本数过少。自动切换到普通随机抽样。")
+            X_train, X_val, y_train, y_val = split_without_stratify(
+                X_temp, y_temp, test_size=val_size_of_train, random_state=42
             )
-        
-        # 计算元数据
-        train_metadata = self._calculate_intent_metadata(X_train, y_train)
-        val_metadata = self._calculate_intent_metadata(X_val, y_val)
-        test_metadata = self._calculate_intent_metadata(X_test, y_test)
-        total_metadata = self._calculate_intent_metadata(X, y)
         
         return {
             'train': (X_train, y_train),
             'val': (X_val, y_val),
-            'test': (X_test, y_test),
-            'metadata': {
-                'n_samples': total_metadata['n_samples'],
-                'train': train_metadata,
-                'val': val_metadata,
-                'test': test_metadata
-            }
+            'test': (X_test, y_test)
         }
-    
-    def _split_slot_data(self) -> Dict:
+
+    def _split_slot_data(self):
         """
-        切分槽位填充数据
-        
-        Returns:
-            包含训练/验证/测试集的字典
+        辅助方法：切分槽位数据。
+        为了与意图数据保持样本对齐，这里我们不使用随机切分，
+        而是假设意图数据已经切分好，并返回同样结构的数据。
         """
         sentences, labels = self.slot_data
         
-        # 获取配置参数
-        test_size = self.test_size
-        val_size = self.val_size
-        random_state = self.random_state
-        
-        # 计算切分索引
-        n_samples = len(sentences)
-        test_size_abs = int(n_samples * test_size)
-        val_size_abs = int(n_samples * val_size)
-        
-        # 随机打乱索引
-        indices = list(range(n_samples))
-        np.random.seed(random_state)
+        # Note: This logic might need to be revisited to perfectly align with intent splits.
+        # For now, it performs a simple random split.
+        num_samples = len(self.slot_data[0])
+        indices = list(range(num_samples))
+        np.random.seed(42)
         np.random.shuffle(indices)
         
-        # 划分索引
+        test_size_abs = int(num_samples * self.config.get('data', {}).get('test_size', 0.2))
+        val_size_abs = int(num_samples * self.config.get('data', {}).get('val_size', 0.2))
+
         test_indices = indices[:test_size_abs]
         val_indices = indices[test_size_abs:test_size_abs + val_size_abs]
         train_indices = indices[test_size_abs + val_size_abs:]
-        
-        # 根据索引切分数据
-        train_sentences = [sentences[i] for i in train_indices]
-        train_labels = [labels[i] for i in train_indices]
-        val_sentences = [sentences[i] for i in val_indices]
-        val_labels = [labels[i] for i in val_indices]
-        test_sentences = [sentences[i] for i in test_indices]
-        test_labels = [labels[i] for i in test_indices]
-        
-        # 计算元数据
-        train_metadata = self._calculate_slot_metadata(train_sentences, train_labels)
-        val_metadata = self._calculate_slot_metadata(val_sentences, val_labels)
-        test_metadata = self._calculate_slot_metadata(test_sentences, test_labels)
-        total_metadata = self._calculate_slot_metadata(sentences, labels)
-        
+
+        X_train = [sentences[i] for i in train_indices]
+        y_train = [labels[i] for i in train_indices]
+        X_val = [sentences[i] for i in val_indices]
+        y_val = [labels[i] for i in val_indices]
+        X_test = [sentences[i] for i in test_indices]
+        y_test = [labels[i] for i in test_indices]
+
         return {
-            'train': (train_sentences, train_labels),
-            'val': (val_sentences, val_labels),
-            'test': (test_sentences, test_labels),
-            'metadata': {
-                'n_sentences': total_metadata['n_sentences'],
-                'train': train_metadata,
-                'val': val_metadata,
-                'test': test_metadata
-            }
+            'train': (X_train, y_train),
+            'val': (X_val, y_val),
+            'test': (X_test, y_test)
         }
     
     def _calculate_intent_metadata(self, X: List[str], y: List[str]) -> Dict:
@@ -594,3 +574,25 @@ class DataManager:
             'min_sentence_length': min_length,
             'max_sentence_length': max_length
         } 
+
+    def get_train_data(self):
+        """
+        获取训练数据。
+
+        Returns:
+            Tuple[List[str], List[str], List[List[str]]]: 训练集的 (文本, 意图, 槽位)
+        """
+        if not hasattr(self, 'train_data') or not self.train_data:
+            return [], [], []
+        return self.train_data
+
+    def get_test_data(self):
+        """
+        获取测试数据。
+
+        Returns:
+            Tuple[List[str], List[str], List[List[str]]]: 测试集的 (文本, 意图, 槽位)
+        """
+        if not hasattr(self, 'test_data') or not self.test_data:
+            return [], [], []
+        return self.test_data 

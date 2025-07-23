@@ -18,10 +18,16 @@ intent_feature:
   ngram_range: [1, 2] # ngram范围，(1,2)表示1-2gram
   min_df: 1           # 最小文档频率，过滤低频特征
   analyzer: char      # 分析粒度，char=字符级，word=词级
+  intent_tfidf: intent_tfidf.pkl  # TF-IDF特征提取器文件名
 
 slot_feature:
   max_features: 1000  # 槽位特征最大数
   ngram_range: [1, 2] # 槽位特征ngram范围
+
+# ===================== 模型文件名配置 =====================
+model:
+  intent_classifier: intent_classifier.pkl  # 意图分类器模型文件名
+  sequence_slot_filler: sequence_slot_filler.pkl  # 序列槽位填充器模型文件名
 
 # ===================== 分类器参数 =====================
 classifier_type: logistic   # 分类器类型，可选logistic/svm/random_forest

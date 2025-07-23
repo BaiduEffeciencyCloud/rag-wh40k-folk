@@ -261,101 +261,8 @@ class SequenceSlotFiller:
         
         return min(1.0, overall_confidence)
     
-    def evaluate(self, test_data: List[Dict[str, Any]]) -> Dict[str, float]:
-        """
-        评估模型性能
-        
-        Args:
-            test_data: 测试数据
-            
-        Returns:
-            评估指标
-        """
-        if not self.is_trained:
-            raise ValueError("序列槽位填充器尚未训练")
-        
-        # 准备测试数据
-        queries = [item['query'] for item in test_data]
-        slot_labels = [item['slots'] for item in test_data]
-        
-        # 转换为BIO标注
-        bio_test_data = self.bio_annotator.create_training_data(queries, slot_labels)
-        
-        if not bio_test_data:
-            return {'error': '没有有效的测试数据'}
-        
-        # 提取特征
-        X_test, y_test = self._prepare_training_features(bio_test_data)
-        
-        # 预测
-        y_pred = self.crf.predict(X_test)
-        
-        # 计算评估指标
-        report = flat_classification_report(y_test, y_pred, output_dict=True)
-        
-        # 提取关键指标
-        metrics = {
-            'precision': report.get('weighted avg', {}).get('precision', 0.0),
-            'recall': report.get('weighted avg', {}).get('recall', 0.0),
-            'f1_score': report.get('weighted avg', {}).get('f1-score', 0.0),
-            'accuracy': report.get('accuracy', 0.0)
-        }
-        
-        # 添加槽位级别的指标
-        slot_metrics = self._calculate_slot_level_metrics(test_data)
-        metrics.update(slot_metrics)
-        
-        return metrics
     
-    def _calculate_slot_level_metrics(self, test_data: List[Dict[str, Any]]) -> Dict[str, float]:
-        """
-        计算槽位级别的评估指标
-        
-        Args:
-            test_data: 测试数据
-            
-        Returns:
-            槽位级别指标
-        """
-        total_slots = 0
-        correct_slots = 0
-        total_boundaries = 0
-        correct_boundaries = 0
-        
-        for item in test_data:
-            query = item['query']
-            true_slots = item['slots']
-            
-            # 预测
-            result = self.predict(query, item.get('intent', ''))
-            pred_slots = result.slots
-            
-            # 槽位存在性检查
-            for slot_name, true_value in true_slots.items():
-                total_slots += 1
-                if slot_name in pred_slots and pred_slots[slot_name].value == true_value:
-                    correct_slots += 1
-            
-            # 边界检查
-            for slot_name, true_value in true_slots.items():
-                if slot_name in pred_slots:
-                    pred_slot = pred_slots[slot_name]
-                    # 检查边界是否接近
-                    true_start = query.find(true_value)
-                    true_end = true_start + len(true_value)
-                    
-                    if (abs(pred_slot.start_pos - true_start) <= 1 and 
-                        abs(pred_slot.end_pos - true_end) <= 1):
-                        correct_boundaries += 1
-                    total_boundaries += 1
-        
-        metrics = {}
-        if total_slots > 0:
-            metrics['slot_accuracy'] = correct_slots / total_slots
-        if total_boundaries > 0:
-            metrics['boundary_accuracy'] = correct_boundaries / total_boundaries
-        
-        return metrics
+
     
     def save_model(self, file_path: str):
         """
@@ -379,44 +286,49 @@ class SequenceSlotFiller:
             'config': self.config
         }
         
+        # 使用固定的info文件名，因为它不在config.yaml中定义
         info_path = os.path.join(model_dir, 'sequence_slot_filler_info.json')
         with open(info_path, 'w', encoding='utf-8') as f:
             json.dump(model_info, f, ensure_ascii=False, indent=2)
         
         logger.info(f"序列槽位填充器模型已保存到: {file_path}")
     
-    def load_model(self, model_dir: str):
+    def load_model(self, file_path: str):
         """
         加载模型
         
         Args:
-            model_dir: 模型目录
+            file_path: 模型文件路径 (例如: .../sequence_slot_filler.pkl)
         """
-        # 加载CRF模型
-        crf_path = os.path.join(model_dir, 'crf_model.pkl')
-        if not os.path.exists(crf_path):
-            raise FileNotFoundError(f"CRF模型文件不存在: {crf_path}")
+        # 1. 加载CRF模型本身
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"序列槽位填充器模型文件不存在: {file_path}")
         
-        self.crf = joblib.load(crf_path)
+        self.crf = joblib.load(file_path)
         
-        # 加载配置和状态
-        info_path = os.path.join(model_dir, 'model_info.json')
+        # 2. 根据模型文件路径推断并加载附带的info.json文件
+        model_dir = os.path.dirname(file_path)
+        # info文件名是固定的，与save_model保持一致
+        info_path = os.path.join(model_dir, 'sequence_slot_filler_info.json')
+        
         if not os.path.exists(info_path):
             raise FileNotFoundError(f"模型信息文件不存在: {info_path}")
         
         with open(info_path, 'r', encoding='utf-8') as f:
             model_info = json.load(f)
         
-        self.is_trained = model_info['is_trained']
-        self.label_set = set(model_info['label_set'])
-        self.slot_names = set(model_info['slot_names'])
-        self.config = model_info['config']
+        # 3. 恢复模型状态
+        self.is_trained = model_info.get('is_trained', False)
+        self.label_set = set(model_info.get('label_set', []))
+        self.slot_names = set(model_info.get('slot_names', []))
+        # 优先使用加载的config，因为它包含了训练时的特定参数
+        self.config = model_info.get('config', self.config)
         
-        # 重新初始化组件
+        # 4. 重新初始化依赖组件
         self.bio_annotator = BIOAnnotator()
         self.feature_extractor = CRFFeatureExtractor(self.config)
         
-        logger.info(f"序列槽位填充器模型已从 {model_dir} 加载")
+        logger.info(f"序列槽位填充器模型已从 {file_path} 加载")
     
     def get_model_info(self) -> Dict[str, Any]:
         """

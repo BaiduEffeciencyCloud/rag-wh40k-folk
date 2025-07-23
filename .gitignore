@@ -20,6 +20,9 @@ document/
 #模型和词典位置
 dict/
 models/
+#意图识别模块的产出和原始数据
+intent_training/data/raw
+intent_training/model_output
 # 存放输出文件
 DATAUPLOAD/chunks/
 # 存放测试文件

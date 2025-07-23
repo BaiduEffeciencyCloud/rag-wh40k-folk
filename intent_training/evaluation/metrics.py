@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Tuple
 import numpy as np
 from seqeval.metrics import classification_report, f1_score, precision_score, recall_score
+from sklearn.metrics import confusion_matrix
 
 
 class MetricCalculator:
@@ -79,3 +80,30 @@ class MetricCalculator:
                 correct_frames += 1
         
         return correct_frames / total_frames if total_frames > 0 else 0.0 
+
+    @staticmethod
+    def calculate_confusion_matrix(y_true: List[str], y_pred: List[str]) -> Dict[str, Any]:
+        """
+        计算意图识别的混淆矩阵。
+
+        Args:
+            y_true (List[str]): 真实的意图标签列表。
+            y_pred (List[str]): 预测的意图标签列表。
+
+        Returns:
+            Dict[str, Any]: 包含标签和矩阵的字典。
+                            {
+                                "labels": ["intent1", "intent2", ...],
+                                "matrix": [[...], [...], ...]
+                            }
+        """
+        if len(y_true) != len(y_pred):
+            raise ValueError("输入列表长度不一致")
+        
+        labels = sorted(list(set(y_true) | set(y_pred)))
+        matrix = confusion_matrix(y_true, y_pred, labels=labels)
+        
+        return {
+            "labels": labels,
+            "matrix": matrix.tolist()
+        } 

@@ -111,7 +111,7 @@
 位置	O
 ？	O
 
-拥有	O
+拥有	B-HAVE
 “	O
 独行特工	B-SKILL
 ”	O
@@ -139,7 +139,7 @@
 熔岩身躯	B-SKILL
 ”	O
 技能	B-SKILL_TYPE
-有	O
+有	B-HAVE
 什么	B-RESULT
 效果	I-RESULT
 ？	O
@@ -152,7 +152,7 @@
 致命伤	B-TERM
 是	O
 由	O
-带有	O
+带有	B-HAVE
 [	O
 毁灭伤害	B-SKILL
 ]	O
@@ -199,8 +199,8 @@
 的	O
 身手矫健	B-SKILL
 技能	B-SKILL_TYPE
-有	B-RESULT
-什么	I-RESULT
+有	B-HAVE
+什么	B-RESULT
 效果	I-RESULT
 ？	O
 
@@ -232,7 +232,7 @@
 单位	B-UNIT_TYPE
 攻击	B-ATTACK_TYPE
 时	B-CONDITION
-有	O
+有	B-HAVE
 什么	B-RESULT
 特殊	I-RESULT
 加成	I-RESULT
@@ -298,7 +298,7 @@
 
 搭乘	B-ACTION
 后	B-CONDITION
-有	O
+具有	B-HAVE
 哪些	B-RESULT
 限制	I-RESULT
 ？	O
@@ -312,7 +312,7 @@
 时	I-CONDITION
 ，	O
 命中掷骰	B-TERM
-有	O
+有	B-HAVE
 什么	B-RESULT
 特殊	I-RESULT
 限制	I-RESULT
@@ -324,7 +324,7 @@
 迷雾	I-SKILL
 （灵能）	I-SKILL
 技能	B-SKILL_TYPE
-有	O
+有	B-HAVE
 什么	B-RESULT
 效果	I-RESULT
 
@@ -343,7 +343,7 @@
 抵达	B-ACTION
 战场	I-ACTION
 时	B-CONDITION
-有	O
+有	B-HAVE
 哪些	B-RESULT
 限制	I-RESULT
 和	O
@@ -355,22 +355,22 @@
 的	O
 快速上车	B-SKILL
 技能	B-SKILL_TYPE
-有	O
+有	B-HAVE
 什么	B-RESULT
 效果	B-RESULT
 ？	O
 
 丑角	B-FACTION
-有	B-HOWMANY
-多少	I-HOWMANY
+有	B-HAVE
+多少	B-HOWMANY
 个	O
 不同	O
 的	O
 单位	B-UNIT_TYPE
 
 艾达灵族	B-FACTION
-有	B-HOWMANY
-哪些	I-HOWMANY
+有	B-HAVE
+哪些	B-HOWMANY
 单位	B-UNIT_TYPE
 可以	B-BOOL
 使用	B-ACTION
@@ -378,29 +378,29 @@
 技能	B-SKILL_TYPE
 
 艾达灵族	B-FACTION
-有	B-HOWMANY
-多少	I-HOWMANY
+有	B-HAVE
+多少	B-HOWMANY
 运输载具	B-UNIT_KWS
 
 艾达灵族	B-FACTION
-有	B-HOWMANY
-哪些	I-HOWMANY
+有	B-HAVE
+哪些	B-HOWMANY
 灵能者	B-UNIT_KWS
 人物	B-UNIT
 
 艾达灵族	B-FACTION
-有	B-HOWMANY
-哪些	I-HOWMANY
+有	B-HAVE
+哪些	B-HOWMANY
 骑乘	B-UNIT_KWS
 单位	B-UNIT_TYPE
 
 艾达灵族	B-FACTION
 军队	I-FACTION
 中	O
-有	B-HOWMANY
-哪些	I-HOWMANY
+有	B-HAVE
+多少	B-HOWMANY
 武器	B-WEAPON
-拥有	O
+拥有	B-HAVE
 [	O
 洪流	B-WEAPON_KWS
 ]	O
@@ -412,8 +412,8 @@ Autarch	O
 )	O
 
 艾达灵族	B-FACTION
-还有	B-HOWMANY
-多少	I-HOWMANY
+还有	B-HAVE
+多少	B-HOWMANY
 人物	B-UNIT_KWS
 模型	B-UNIT_TYPE
 可以	B-BOOL
@@ -425,8 +425,8 @@ DeathSpinner	O
 ？	O
 
 混沌骑士团	B-FACTION
-有	B-HOWMANY
-几个	I-HOWMANY
+有	B-HAVE
+几个	B-HOWMANY
 能够	B-BOOL
 飞行	B-TERM
 的	O
@@ -438,8 +438,8 @@ DeathSpinner	O
 ，	O
 太空死灵	B-FACTION
 还	O
-拥有	B-HOWMANY
-哪些	I-HOWMANY
+拥有	B-HAVE
+哪些	B-HOWMANY
 步兵	B-UNIT_KWS
 单位	B-UNIT_TYPE
 ？	O
@@ -450,14 +450,14 @@ DeathSpinner	O
 凤凰领主	B-UNIT_KWS
 ，	O
 还	O
-有	B-HOWMANY
-哪些	I-HOWMANY
+有	B-HAVE
+哪些	B-HOWMANY
 史诗英雄	B-UNIT_KWS
 
 混沌星际战士	B-FACTION
-有	B-HOWMANY
-哪些	I-HOWMANY
-可以	O
+有	B-HAVE
+哪些	B-HOWMANY
+可以	B-BOOL
 召唤	B-ACTION
 混沌恶魔	B-FACTION
 的	O
@@ -832,13 +832,13 @@ AP	B-ATTR
 高	I-COMPARE
 ？	O
 
-机械	O
-军团	B-UNIT
+机械军团	B-UNIT
 的	O
-所有	O
+所有	B-HOWMANY
 重型	B-WEAPON
 武器	I-WEAPON
-有哪些	B-WHICH
+有	B-HAVE
+哪些	B-HOWMANY
 ？	O
 
 机械	O
@@ -917,7 +917,7 @@ S	B-ATTR
 3	B-NUMBER
 ,	O
 它	O
-有	O
+有	B-HAVE
 针对	B-WEAPON_KWS
 步兵	I-WEAPON_KWS
 3+	I-WEAPON_KWS
@@ -948,7 +948,7 @@ T	B-ATTR
 
 一个	B-NUMBER
 联合单位	B-UNIT_TYPE
-有	O
+有	B-HAVE
 13	B-NUMBER
 个	O
 模型	B-UNIT_TYPE
@@ -1251,7 +1251,7 @@ AP	B-ATTR
 模型	B-UNIT_TYPE
 之外	B-NEGATIVE
 ，	O
-还有	O
+还有	B-HAVE
 哪些	B-HOWMANY
 势力	B-FACTION
 的	O
@@ -1267,7 +1267,7 @@ AP	B-ATTR
 单位	B-UNIT_TYPE
 之外	B-NEGATIVE
 ，	O
-还有	O
+还有	B-HAVE
 哪些	B-HOWMANY
 单位	B-UNIT
 可以	B-BOOL
@@ -1282,7 +1282,7 @@ AP	B-ATTR
 单位	B-UNIT_TYPE
 之外	B-NEGATIVE
 ，	O
-还有	O
+还有	B-HAVE
 哪些	B-HOWMANY
 单位	B-UNIT
 可以	B-BOOL
@@ -1297,7 +1297,7 @@ AP	B-ATTR
 单位	B-UNIT_TYPE
 之外	B-NEGATIVE
 ，	O
-还有	O
+还有	B-HAVE
 哪些	B-HOWMANY
 单位	B-UNIT
 可以	B-BOOL
@@ -1482,7 +1482,7 @@ AP	B-ATTR
 对	O
 什么	B-HOWMANY
 单位	B-UNIT
-有	O
+有	B-HAVE
 特殊	B-RESULT
 效果	I-RESULT
 ？	O
@@ -1538,7 +1538,7 @@ AP	B-ATTR
 对	O
 载具	B-UNIT_TYPE
 单位	I-UNIT_TYPE
-有	O
+有	B-HAVE
 什么	B-RESULT
 加成	I-RESULT
 ？	O
@@ -1552,7 +1552,7 @@ AP	B-ATTR
 对	O
 步兵	B-UNIT_TYPE
 单位	I-UNIT_TYPE
-有	O
+有	B-HAVE
 什么	B-RESULT
 效果	I-RESULT
 ？	O

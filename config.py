@@ -51,7 +51,7 @@ if not all([NEO4J_TEST_URI, NEO4J_TEST_USERNAME, NEO4J_TEST_PASSWORD]):
     logger.warning("Neo4j test configuration incomplete. Please set NEO4J_TEST_URI, NEO4J_TEST_USERNAME, and NEO4J_TEST_PASSWORD in .env file")
 
 # 模型配置
-DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_TEMPERATURE", "0.4"))
+DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_TEMPERATURE", "0.3"))
 DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", "15"))
 
 # 超时配置
@@ -85,7 +85,7 @@ HYBRID_ALPHA = float(os.getenv('HYBRID_ALPHA', '0.3'))
 
 # rerank 模型
 RERANK_MODEL = os.getenv("RERANK_MODEL", "bge-reranker-v2-m3")
-RERANK_TOPK = 30
+RERANK_TOPK = 20
 
 # BM25相关配置
 BM25_K1 = float(os.getenv('BM25_K1', '1.5'))

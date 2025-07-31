@@ -8,7 +8,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
-from distutils.util import strtobool
+from setuptools._distutils.util import strtobool
 
 logger = logging.getLogger(__name__)
 

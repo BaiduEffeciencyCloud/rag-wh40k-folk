@@ -21,19 +21,19 @@ PROCESSOR_CONFIGS = {
         'enabled': True,
         'model': RERANK_MODEL,  # 重排序模型
         'top_k': 20,  # 重排序后保留的结果数量
-        'threshold': 0.6,  # 相关性阈值
+        'threshold': 0.5,  # 相关性阈值
         'batch_size': 32,  # 批处理大小
     },
     'mmr': {
         'enabled': True,
         'lambda_param': 0.8,  # MMR参数，平衡相关性和多样性 (0=纯多样性, 1=纯相关性)
-        'select_n': 20,       # 最终选择的文档数量
+        'select_n': 15,       # 最终选择的文档数量
         'enable_mmr': True,   # 是否启用MMR处理
         'min_text_length': 10, # 处理的最小文本长度
         
         # 新增优化参数
         'cache_max_similarity': True,  # 是否缓存最大相似度值
-        'relevance_threshold': 0.3,    # 相关性阈值，低于此值的结果被过滤
+        'relevance_threshold': 0.4,    # 相关性阈值，低于此值的结果被过滤
         'enable_relevance_filter': False,  # 是否启用相关性过滤
         'output_order': 'mmr_score',   # 输出排序方式 ('mmr_score', 'original', 'relevance')
         'reverse_order': False,        # 是否逆序排列

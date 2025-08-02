@@ -3,6 +3,7 @@ from .processorinterface import QueryProcessorInterface
 from .straightforward import StraightforwardProcessor
 from .expander import ExpanderQueryProcessor
 from .cot import COTProcessor
+from .adaptive import AdaptiveProcessor
 
 class QueryProcessorFactory:
     """查询处理器工厂类"""
@@ -20,7 +21,8 @@ class QueryProcessorFactory:
             "straight": StraightforwardProcessor(),
             "origin": StraightforwardProcessor(),  # origin等同于straightforward
             "expander": ExpanderQueryProcessor(),
-            "cot": COTProcessor()
+            "cot": COTProcessor(),
+            "adaptive": AdaptiveProcessor()  # 新增自适应处理器
         }
         
         processor = processors.get(processor_type)
@@ -47,7 +49,7 @@ class QueryProcessorFactory:
     @staticmethod
     def get_available_processors() -> List[str]:
         """获取所有可用的处理器类型"""
-        return ["straight", "origin", "expander", "cot"]
+        return ["straight", "origin", "expander", "cot", "adaptive"]
     
     @staticmethod
     def validate_processor_type(processor_type: str) -> bool:
@@ -83,7 +85,8 @@ class QueryProcessorFactory:
             "straightforward": "直接传递原始查询，不做任何处理",
             "origin": "直接传递原始查询，不做任何处理（与straightforward相同）",
             "expander": "查询扩写处理器，生成多个相关查询",
-            "cot": "思维链处理器，将复杂查询分解为多个子查询"
+            "cot": "思维链处理器，将复杂查询分解为多个子查询",
+            "adaptive": "自适应处理器，根据意图动态选择检索策略"
         }
         return descriptions.get(processor_type, "未知处理器类型")
 

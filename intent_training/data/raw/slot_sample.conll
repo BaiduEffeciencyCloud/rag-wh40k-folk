@@ -357,7 +357,7 @@
 技能	B-SKILL_TYPE
 有	B-HAVE
 什么	B-RESULT
-效果	B-RESULT
+效果	I-RESULT
 ？	O
 
 丑角	B-FACTION

@@ -12,7 +12,7 @@ from config import PINECONE_MAX_SPARSE_VALUES
 logger = logging.getLogger(__name__)
 
 class BM25Manager:
-    def __init__(self, k1=1.5, b=0.75, min_freq=5, max_vocab_size=10000, custom_dict_path=None, user_dict_path=None):
+    def __init__(self, k1=1.5, b=0.75, min_freq=5, max_vocab_size=10000, custom_dict_path=None, user_dict_path=None, enable_wh40k_enhancement=False):
         self.k1 = k1
         self.b = b
         self.min_freq = min_freq
@@ -23,6 +23,13 @@ class BM25Manager:
         self.raw_texts = []  # 原始文本列表
         self.is_fitted = False
         self.whitelist_phrases = set()  # 新增：存储白名单短语
+        self.enable_wh40k_enhancement = enable_wh40k_enhancement
+        
+        # 初始化权重增强器（如果启用）
+        if enable_wh40k_enhancement:
+            from dataupload.wh40k_weight_enhancer import WH40KWeightEnhancer
+            self.weight_enhancer = WH40KWeightEnhancer()
+        
         if custom_dict_path and os.path.exists(custom_dict_path):
             jieba.load_userdict(custom_dict_path)
         if user_dict_path and os.path.exists(user_dict_path):
@@ -116,6 +123,11 @@ class BM25Manager:
                 tf = freq
                 denom = tf + k1 * (1 - b + b * dl / avgdl)
                 score = idf * tf * (k1 + 1) / denom
+                
+                # 应用权重增强（如果启用）
+                if self.enable_wh40k_enhancement and hasattr(self, 'weight_enhancer'):
+                    score = self.weight_enhancer.calculate_enhanced_weight(token, score)
+                
                 if score > 0:
                     indices.append(self.vocabulary[token])
                     values.append(score)

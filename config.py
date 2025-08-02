@@ -81,11 +81,11 @@ LLM_IMAGE_MODEL=os.getenv("LLM_IMAGE_MODEL", "gpt-4o")
 # Hybrid检索配置
 #当 α = 0 时，完全依赖稀疏检索（纯 BM25/TF-IDF）；
 #当 α = 1 时，完全依赖密集检索（纯语义向量匹配）；
-HYBRID_ALPHA = float(os.getenv('HYBRID_ALPHA', '0.3'))
+HYBRID_ALPHA = float(os.getenv('HYBRID_ALPHA', '0.2'))
 
 # rerank 模型
 RERANK_MODEL = os.getenv("RERANK_MODEL", "bge-reranker-v2-m3")
-RERANK_TOPK = 20
+RERANK_TOPK = 30
 
 # BM25相关配置
 BM25_K1 = float(os.getenv('BM25_K1', '1.5'))

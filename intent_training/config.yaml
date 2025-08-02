@@ -24,6 +24,99 @@ slot_feature:
   max_features: 1000  # 槽位特征最大数
   ngram_range: [1, 2] # 槽位特征ngram范围
 
+# ===================== 高级特征提取器配置 =====================
+advanced_feature:
+  # 路径配置
+  vocab_dir: "dict/wh40k_vocabulary"  # WH40K词汇表目录
+  basic_keywords: ["战锤", "40k", "wh40k"]  # 基本关键词列表
+  
+  # TF-IDF特征配置
+  tfidf:
+    max_features: 1000  # 最大特征数
+    ngram_range: [1, 2] # ngram范围
+    min_df: 1           # 最小文档频率
+    analyzer: char       # 分析粒度
+  
+  # 复杂度计算配置
+  complexity:
+    max_sentence_length: 20.0  # 最大句子长度阈值
+    long_word_threshold: 4     # 长词长度阈值
+    very_long_word_threshold: 6  # 超长词长度阈值
+    punctuation_threshold: 10.0  # 标点符号复杂度阈值
+    weight_length: 0.25        # 长度复杂度权重
+    weight_unique: 0.25        # 词汇多样性权重
+    weight_long_word: 0.25     # 长词复杂度权重
+    weight_punctuation: 0.25   # 标点符号复杂度权重
+  
+  # 统计特征配置
+  statistical:
+    long_word_threshold: 4     # 长词长度阈值
+    very_long_word_threshold: 6  # 超长词长度阈值
+  
+  # 标点符号配置
+  punctuation:
+    question_exclamation: "？？!！"  # 问号感叹号
+    quotes: '""'''              # 引号
+    brackets: "（）【】"         # 括号
+    others: "：；，。"          # 其他标点
+    all_punctuation: "，。！？；：""''（）【】"  # 所有标点符号
+  
+  # 意图关键词配置
+  intent_keywords:
+    compare:
+      - "哪个"
+      - "相比"
+      - "比较"
+      - "更"
+      - "最高"
+      - "最低"
+      - "最远"
+      - "最近"
+      - "最长"
+      - "最短"
+      - "哪个更高"
+      - "哪个更低"
+      - "哪个更好"
+      - "哪个更差"
+      - "哪个更小"
+      - "哪个更大"
+    list:
+      - "有哪些"
+      - "多少个"
+      - "列举"
+      - "哪些"
+      - "多少种"
+      - "什么类型"
+      - "什么种类"
+      - "什么单位"
+      - "什么武器"
+      - "什么技能"
+    query:
+      - "什么是"
+      - "如何"
+      - "解释"
+      - "说明"
+      - "定义"
+      - "是什么"
+      - "什么意思"
+      - "怎么用"
+      - "怎么触发"
+      - "怎么计算"
+      - "是啥"
+    rule:
+      - "什么情况下"
+      - "如何触发"
+      - "规则"
+      - "何时"
+      - "条件"
+      - "当...时"
+      - "在...时"
+      - "在...后"
+      - "什么时候"
+      - "什么条件"
+      - "什么要求"
+      - "什么限制"
+
 # ===================== 模型文件名配置 =====================
 model:
   intent_classifier: intent_classifier.pkl  # 意图分类器模型文件名

@@ -42,7 +42,7 @@ class IntentClassifier:
         # 选择分类器类型
         self.model = self._select_classifier()
         
-        # 保存类别信息
+        # 保存类别信息,按照名称对类别进行排序,在当前意图下的分类就是(compare, list, query, rule)
         self.classes_ = sorted(list(set(y)))
         
         # 训练模型

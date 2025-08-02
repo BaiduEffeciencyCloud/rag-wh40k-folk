@@ -580,5 +580,27 @@ def main():
     else:
         print('[WARN] 未生成任何文件')
 
+def generate_hybrid_whitelist(texts, output_path, wh40k_vocab_path=None):
+    """生成混合白名单：自动发现 + 专业术语"""
+    
+    # 1. 自动发现短语
+    auto_phrases = extract_phrases(texts)
+    
+    # 2. 加载专业术语（如果提供）
+    wh40k_phrases = []
+    if wh40k_vocab_path:
+        from dataupload.wh40k_whitelist_generator import WH40KWhitelistGenerator
+        generator = WH40KWhitelistGenerator(wh40k_vocab_path)
+        wh40k_phrases = generator.extract_wh40k_phrases()
+    
+    # 3. 合并去重
+    all_phrases = list(set(auto_phrases + wh40k_phrases))
+    
+    # 4. 生成白名单
+    generate_whitelist(all_phrases, output_path)
+    
+    return output_path
+
+
 if __name__ == '__main__':
     main() 

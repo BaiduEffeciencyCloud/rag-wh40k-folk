@@ -51,6 +51,11 @@ class Evaluator:
         """
         # 1. 使用模型进行预测
         pred_intents, pred_slots, intent_confidences = self.model.predict(texts)
+        
+        # 保存预测结果供外部使用
+        self.last_pred_intents = pred_intents
+        self.last_pred_slots = pred_slots
+        self.last_intent_confidences = intent_confidences
 
         # 2. 计算各项指标
         intent_accuracy = self.metric_calculator.calculate_intent_accuracy(true_intents, pred_intents)
@@ -58,6 +63,11 @@ class Evaluator:
         frame_accuracy = self.metric_calculator.calculate_frame_accuracy(
             true_intents, pred_intents, true_slots, pred_slots
         )
+        
+        # 保存计算结果供外部使用
+        self.last_intent_accuracy = intent_accuracy
+        self.last_slot_f1_report = slot_f1_report
+        self.last_frame_accuracy = frame_accuracy
 
         # 3. 准备报告数据
         summary_data = {

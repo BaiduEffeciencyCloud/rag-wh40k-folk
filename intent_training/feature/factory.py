@@ -28,18 +28,13 @@ class FeatureExtractorFactory:
             特征提取器实例
         """
         feature_type = config.get('feature_type', 'basic')
-        use_enhanced = config.get('use_enhanced_features', False)
         
         if feature_type == 'pa':
             logger.info("创建Position-Aware特征提取器")
             return EnhancedFeatureExtractor(config)
         elif feature_type == 'advanced':
-            if use_enhanced:
-                logger.info("创建增强高级特征提取器（句向量融合）")
-                return AdvancedFeature(config)  # AdvancedFeature已经包含增强功能
-            else:
-                logger.info("创建高级特征提取器（基础版本）")
-                return AdvancedFeature(config)
+            logger.info("创建高级特征提取器")
+            return AdvancedFeature(config)
         else:
             logger.info("创建基础特征提取器")
             return IntentFeatureExtractor(config)
@@ -66,5 +61,4 @@ class FeatureExtractorFactory:
             是否使用增强特征
         """
         feature_type = config.get('feature_type', 'basic')
-        use_enhanced = config.get('use_enhanced_features', False)
-        return feature_type == 'advanced' and use_enhanced or feature_type == 'pa' 
+        return feature_type == 'advanced' or feature_type == 'pa' 

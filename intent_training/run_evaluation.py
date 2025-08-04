@@ -3,6 +3,7 @@ import os
 import sys
 import yaml
 import joblib
+import shutil
 from datetime import datetime
 import jieba
 
@@ -276,6 +277,119 @@ def _extract_tokenized_sentences_from_conll(conll_file_path):
     return tokenized_sentences
 
 
+def handle_model_export(config, evaluator, version_path):
+    """
+    根据评估结果条件导出模型
+    
+    Args:
+        config: 配置字典
+        evaluator: 评估器实例
+        version_path: 模型版本路径
+    """
+    
+    evaluation_config = config.get('evaluation', {})
+    if not evaluation_config.get('run_evaluation', False):
+        print("评估导出功能未启用")
+        return
+    
+    export_config = evaluation_config.get('export', {})
+    if not export_config.get('enabled', False):
+        print("模型导出功能未启用")
+        return
+    
+    export_dir = export_config.get('export_dir', 'dict/')
+    override = export_config.get('override', True)
+    
+    # 创建导出目录
+    os.makedirs(export_dir, exist_ok=True)
+    
+    # 检查意图分类器导出
+    intent_config = evaluation_config.get('intent_classifier', {})
+    if intent_config.get('enabled', False):
+        intent_accuracy = evaluator.last_intent_accuracy
+        threshold = intent_config.get('threshold', 0.9)
+        
+        if intent_accuracy >= threshold:
+            print(f"意图分类器准确率: {intent_accuracy:.4f} 超过阈值 {threshold}，准备导出")
+            export_model('intent_classifier', version_path, export_dir, override, config)
+            export_feature_extractor(version_path, export_dir, override, config)
+        else:
+            print(f"意图分类器准确率: {intent_accuracy:.4f} 未达到阈值 {threshold}")
+    
+    # 检查槽位填充器导出
+    slot_config = evaluation_config.get('sequence_slot_filler', {})
+    if slot_config.get('enabled', False):
+        f1_score = evaluator.last_slot_f1_report.get('f1_score', 0.0)
+        threshold = slot_config.get('threshold', 0.5)
+        
+        if f1_score >= threshold:
+            print(f"槽位填充器F1分数: {f1_score:.4f} 超过阈值 {threshold}，准备导出")
+            export_model('sequence_slot_filler', version_path, export_dir, override, config)
+        else:
+            print(f"槽位填充器F1分数: {f1_score:.4f} 未达到阈值 {threshold}")
+
+
+def export_model(model_type, version_path, export_dir, override, config):
+    """
+    导出模型到指定目录
+    
+    Args:
+        model_type: 模型类型
+        version_path: 模型版本路径
+        export_dir: 导出目录
+        override: 是否覆盖
+        config: 配置字典
+    """
+    model_filename = f"{model_type}.pkl"
+    source_path = os.path.join(version_path, "model", model_filename)
+    target_path = os.path.join(export_dir, model_filename)
+    
+    if not os.path.exists(source_path):
+        print(f"源模型文件不存在: {source_path}")
+        return
+    
+    if os.path.exists(target_path) and not override:
+        print(f"目标文件已存在且不允许覆盖: {target_path}")
+        return
+    
+    if os.path.exists(target_path) and override:
+        os.remove(target_path)
+        print(f"删除已存在的目标文件: {target_path}")
+    
+    shutil.copy2(source_path, target_path)
+    print(f"模型导出成功: {source_path} -> {target_path}")
+
+
+def export_feature_extractor(version_path, export_dir, override, config):
+    """
+    导出特征提取器到指定目录
+    
+    Args:
+        version_path: 模型版本路径
+        export_dir: 导出目录
+        override: 是否覆盖
+        config: 配置字典
+    """
+    feature_extractor_name = config.get('intent_feature', {}).get('intent_tfidf', 'intent_tfidf.pkl')
+    source_path = os.path.join(version_path, "feature", feature_extractor_name)
+    target_path = os.path.join(export_dir, feature_extractor_name)
+    
+    if not os.path.exists(source_path):
+        print(f"特征提取器文件不存在: {source_path}")
+        return
+    
+    if os.path.exists(target_path) and not override:
+        print(f"特征提取器文件已存在且不允许覆盖: {target_path}")
+        return
+    
+    if os.path.exists(target_path) and override:
+        os.remove(target_path)
+        print(f"删除已存在的特征提取器文件: {target_path}")
+    
+    shutil.copy2(source_path, target_path)
+    print(f"特征提取器导出成功: {source_path} -> {target_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="对指定的模型版本进行深度评估")
     parser.add_argument("--ver", "-v", default="head",
@@ -304,6 +418,8 @@ def main():
     eval_config = dependencies['config'].copy()
     report_ts = datetime.now().strftime("%y%m%d%H%M%S")
     report_dir = os.path.join(version_path, "report")
+    # 创建report目录
+    os.makedirs(report_dir, exist_ok=True)
     eval_config['summary_report_path'] = os.path.join(report_dir, f"{report_ts}_summary.md")
     eval_config['detailed_report_path'] = os.path.join(report_dir, f"{report_ts}_detailed.json")
     
@@ -329,6 +445,9 @@ def main():
     print(f"  - 详细报告已生成: {eval_config['detailed_report_path']}")
     print("\n主要指标:")
     print(f"  - Frame Accuracy: {all_metrics:.4f}")
+    
+    # 6. 条件导出模型
+    handle_model_export(dependencies['config'], evaluator, version_path)
 
 if __name__ == "__main__":
     main() 

@@ -9,6 +9,9 @@ from intent_training.data.data_manager import DataManager
 from intent_training.feature.feature_engineering import IntentFeatureExtractor
 from intent_training.model.intent_classifier import IntentClassifier
 from intent_training.model.sequence_slot_filler import SequenceSlotFiller
+from intent_training.run_evaluation import find_model_version_path, load_dependencies, load_golden_test_data, IntegratedModel
+from intent_training.evaluation.evaluator import Evaluator
+from intent_training.feature.factory import FeatureExtractorFactory
 import joblib
 import argparse
 import sys
@@ -406,17 +409,15 @@ class IntentTraining:
             self.logger.info("[pipeline] 配置归档完成")
         except Exception as e:
             self.logger.error(f"配置归档异常: {e}")
-        # 保证report目录被创建
-        try:
-            self.archive_report()
-            self.logger.info("[pipeline] 评估报告归档完成")
-        except Exception as e:
-            self.logger.error(f"评估报告归档异常: {e}")
+            
+
         self.logger.info("[pipeline] 归档主流程结束")
         for handler in self.logger.handlers:
             handler.flush()
             if hasattr(handler, 'close'):
                 handler.close()
+
+
 
 
 if __name__ == "__main__":

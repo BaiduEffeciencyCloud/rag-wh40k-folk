@@ -1,6 +1,9 @@
 # ===================== 数据路径配置 =====================
 intent_data_path: intent_training/data/raw/intent_sample.csv   # 意图识别数据CSV路径
 slot_data_path: intent_training/data/raw/slot_sample.conll     # 槽位填充数据CoNLL路径
+golden_test:
+  intent_data_path: intent_training/data/golden_test/intent_test.csv   # 黄金测试集意图数据路径
+  slot_data_path: intent_training/data/golden_test/slot_test.conll     # 黄金测试集槽位数据路径
 
 # ===================== 数据切分参数 =====================
 test_size: 0.2        # 测试集占比，0~1之间小数
@@ -14,7 +17,6 @@ max_sentence_length: 100 # 槽位句子最大长度
 
 # ===================== 特征工程参数 =====================
 feature_type: pa  # 特征提取器类型：basic=基础特征，advanced=高级特征，pa=Position-Aware特征
-use_enhanced_features: true  # 是否使用增强特征（句向量融合）
 intent_feature:
   max_features: 1000  # TF-IDF最大特征数
   ngram_range: [1, 2] # ngram范围，(1,2)表示1-2gram
@@ -32,9 +34,6 @@ advanced_feature:
   enhanced:
     use_sentence_embedding: true  # 是否使用句向量融合
     sentence_model: "shibing624/text2vec-base-chinese"  # 句向量模型
-    fusion_method: "weighted"  # 特征融合方法：concatenate=拼接，weighted=加权
-    pa_weight: 0.7  # Position-Aware特征权重（字符+语义+统计+句子复杂度特征）
-    sentence_weight: 0.3  # 句向量特征权重
     # 网络配置
     network_timeout: 30  # 网络超时时间（秒）
     allow_offline: true  # 是否允许离线模式
@@ -78,12 +77,20 @@ advanced_feature:
     others: "：；，。"          # 其他标点
     all_punctuation: "，。！？；：（）【】"  # 所有标点符号
   
-  # 特征融合权重配置
-  feature_weights:
-    char_features: 1.0      # TF-IDF字符特征权重
-    semantic_features: 3.0  # 语义特征权重（关键词匹配）
-    statistical_features: 1.5  # 统计特征权重（长度、标点等）
-    complexity_features: 10.0  # 句子复杂度特征权重
+  # pa_feature.py 专用权重配置
+  pa_feature_weights:
+    char_weight: 2.0      # 字符特征权重
+    semantic_weight: 2.0  # 语义特征权重
+    statistical_weight: 1.5  # 统计特征权重
+    complexity_weight: 1.0  # 复杂度特征权重
+    sentence_weight: 0.3  # 句向量权重
+  
+  # ad_feature.py 专用权重配置
+  ad_feature_weights:
+    char_weight: 1.0      # 字符特征权重
+    semantic_weight: 2.0  # 语义特征权重
+    statistical_weight: 1.0  # 统计特征权重
+    sentence_weight: 0.5  # 句向量权重
   
   # 意图关键词配置
   intent_keywords:
@@ -187,11 +194,11 @@ classifier:
   ensemble:
     base_classifiers: [logistic, svm, random_forest]
     voting_method: soft  # soft/hard
-    weights: [0.4, 0.3, 0.3]  # 各分类器权重
+    weights: [0.7, 0.2, 0.1]  # 各分类器权重
     
   # 类别权重（用于处理不平衡数据）
   class_weights:
-    Query: 2.5    # 提升Query权重（当前准确率低）
+    Query: 2.0    # 提升Query权重（当前准确率低）
     List: 1.0     # 保持List权重（当前准确率高）
     Compare: 1.5  # 适度提升Compare权重
     Rule: 1.2     # 适度提升Rule权重
@@ -215,9 +222,18 @@ uncertainty:
     margin: 0.2             # 边距方法权重
   buffer_max_size: 1000     # 不确定性查询缓存最大长度 
 
-# 评估相关配置
+# ===================== 评估与导出配置 =====================
 evaluation:
-  run_evaluation: true  # 是否在训练后执行评估流程的总开关
-  export_threshold: 0.85  # 模型评估的质量门槛，frame_accuracy 必须高于此值模型才会被导出
-  summary_report_path: "document/evaluation_summary.md"  # 摘要报告的输出路径
-  detailed_report_path: "document/evaluation_detailed.json"  # 详细报告的输出路径 
+  run_evaluation: true  # 总开关
+  intent_classifier:
+    enabled: true        # 意图分类器评估开关
+    threshold: 0.90      # 导出阈值
+  sequence_slot_filler:
+    enabled: true        # 槽位填充器评估开关  
+    threshold: 0.50      # 导出阈值
+  export:
+    enabled: true        # 导出开关
+    export_dir: "models/"  # 导出目录
+    override: true       # 是否覆盖
+
+

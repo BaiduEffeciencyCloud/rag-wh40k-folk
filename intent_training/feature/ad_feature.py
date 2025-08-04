@@ -94,11 +94,24 @@ class AdvancedFeature(BaseFeatureExtractor):
         semantic_features = self._extract_semantic_features(queries)
         statistical_features = self._extract_statistical_features(queries)
         
+        # 获取ad_feature_weights配置
+        ad_weights = self.advanced_config.get('ad_feature_weights', {})
+        char_weight = ad_weights.get('char_weight', 1.0)
+        semantic_weight = ad_weights.get('semantic_weight', 1.0)
+        statistical_weight = ad_weights.get('statistical_weight', 1.0)
+        
+        logger.info(f"应用ad_feature权重: char={char_weight}, semantic={semantic_weight}, statistical={statistical_weight}")
+        
+        # 应用权重
+        weighted_char_features = char_features * char_weight
+        weighted_semantic_features = semantic_features * semantic_weight
+        weighted_statistical_features = statistical_features * statistical_weight
+        
         # 融合特征
         features = np.concatenate([
-            char_features,
-            semantic_features,
-            statistical_features
+            weighted_char_features,
+            weighted_semantic_features,
+            weighted_statistical_features
         ], axis=1)
         
         return features
@@ -401,7 +414,16 @@ class AdvancedFeature(BaseFeatureExtractor):
         try:
             logger.info(f"开始ad_feature句向量融合，文本: {sentence[:30]}...")
             
-            # 1. 原有特征
+            # 读取增强开关配置
+            enhanced_config = self.advanced_config.get('enhanced', {})
+            use_sentence_embedding = enhanced_config.get('use_sentence_embedding', False)
+            
+            if not use_sentence_embedding:
+                # 不使用句向量，只返回原有特征
+                logger.info("句向量融合已禁用，使用原有特征")
+                return self._extract_semantic_features([sentence])
+            
+            # 1. 原有特征（已经应用了ad_feature_weights）
             original_features = self._extract_semantic_features([sentence])
             logger.info(f"原有特征维度: {original_features.shape}")
             
@@ -409,26 +431,19 @@ class AdvancedFeature(BaseFeatureExtractor):
             sentence_embedding = self.get_sentence_embedding(sentence)
             logger.info(f"句向量维度: {sentence_embedding.shape}")
             
-            # 3. 根据配置选择融合方法
-            fusion_method = self.advanced_config.get('enhanced', {}).get('fusion_method', 'concatenate')
+            # 3. 从ad_feature_weights读取句向量权重
+            ad_weights = self.advanced_config.get('ad_feature_weights', {})
+            sentence_weight = ad_weights.get('sentence_weight', 0.5)
             
-            if fusion_method == 'weighted':
-                # 加权融合：给句向量更高权重
-                sentence_weight = 2.0  # 句向量权重
-                original_weight = 1.0  # 原有特征权重
-                
-                # 加权融合
-                weighted_original = original_features * original_weight
-                weighted_sentence = sentence_embedding.reshape(1, -1) * sentence_weight
-                logger.info(f"加权融合: original={weighted_original.shape}, sentence={weighted_sentence.shape}")
-                
-                # 拼接加权特征
-                combined_features = np.concatenate([weighted_original, weighted_sentence], axis=1)
-                logger.info(f"ad_feature句向量融合成功，最终维度: {combined_features.shape}")
-            else:
-                # 默认拼接融合
-                combined_features = np.concatenate([original_features, sentence_embedding.reshape(1, -1)], axis=1)
-                logger.info(f"ad_feature句向量融合成功，最终维度: {combined_features.shape}")
+            logger.info(f"ad_feature句向量融合权重: sentence_weight={sentence_weight}")
+            
+            # 对句向量应用权重
+            weighted_sentence = sentence_embedding.reshape(1, -1) * sentence_weight
+            logger.info(f"加权融合: original={original_features.shape}, sentence={weighted_sentence.shape}")
+            
+            # 拼接加权特征
+            combined_features = np.concatenate([original_features, weighted_sentence], axis=1)
+            logger.info(f"ad_feature句向量融合成功，最终维度: {combined_features.shape}")
             
             return combined_features
         except Exception as e:

@@ -210,12 +210,15 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
                                      statistical_features: np.ndarray,
                                      complexity_features: np.ndarray = None) -> np.ndarray:
         """原有的分层融合逻辑"""
-        # 获取特征权重配置
-        feature_weights = self.config.get('advanced_feature', {}).get('feature_weights', {})
-        char_weight = feature_weights.get('char_features', 1.0)
-        semantic_weight = feature_weights.get('semantic_features', 1.0)
-        statistical_weight = feature_weights.get('statistical_features', 1.0)
-        complexity_weight = feature_weights.get('complexity_features', 1.0)
+        # 获取pa_feature_weights配置
+        pa_weights = self.config.get('advanced_feature', {}).get('pa_feature_weights', {})
+        char_weight = pa_weights.get('char_weight', 1.0)
+        semantic_weight = pa_weights.get('semantic_weight', 1.0)
+        statistical_weight = pa_weights.get('statistical_weight', 1.0)
+        complexity_weight = pa_weights.get('complexity_weight', 1.0)
+        
+        # 记录权重应用
+        logger.info(f"应用pa_feature权重: char={char_weight}, semantic={semantic_weight}, statistical={statistical_weight}, complexity={complexity_weight}")
         
         # 应用权重
         weighted_char_features = char_features * char_weight
@@ -436,64 +439,26 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
             logger.info(f"开始批量句向量融合，特征维度: char={char_features.shape}, semantic={semantic_features.shape}, statistical={statistical_features.shape}, complexity={complexity_features.shape if complexity_features is not None else 'None'}")
             logger.info(f"批量句向量维度: {sentence_embeddings.shape}")
             
-            # 获取融合方法配置
-            enhanced_config = self.config.get('advanced_feature', {}).get('enhanced', {})
-            fusion_method = enhanced_config.get('fusion_method', 'concatenate')
+            # 获取pa_feature_weights配置
+            pa_weights = self.config.get('advanced_feature', {}).get('pa_feature_weights', {})
+            sentence_weight = pa_weights.get('sentence_weight', 0.3)
             
-            if fusion_method == 'weighted':
-                # 加权融合
-                pa_weight = enhanced_config.get('pa_weight', 0.6)
-                sentence_weight = enhanced_config.get('sentence_weight', 0.4)
-                
-                # 原有特征融合 - 传递句子复杂度特征
-                original_features = self._original_hierarchical_fusion(
-                    char_features, semantic_features, statistical_features, complexity_features
-                )
-                logger.info(f"原有特征融合完成，维度: {original_features.shape}")
-                
-                # 检查复杂度特征是否为空
-                if complexity_features is not None and complexity_features.shape[1] > 0:
-                    # 有复杂度特征时的处理逻辑
-                    char_dim = char_features.shape[1]
-                    semantic_dim = semantic_features.shape[1]
-                    statistical_dim = statistical_features.shape[1]
-                    complexity_dim = complexity_features.shape[1]
-                    
-                    # 计算各特征在original_features中的位置
-                    char_end = char_dim
-                    semantic_end = char_end + semantic_dim
-                    statistical_end = semantic_end + statistical_dim
-                    complexity_start = statistical_end
-                    complexity_end = statistical_end + complexity_dim
-                    
-                    # 分离特征
-                    char_semantic_statistical = original_features[:, :complexity_start]
-                    complexity_part = original_features[:, complexity_start:complexity_end]
-                    
-                    # 只对非句子复杂度特征应用句向量权重
-                    weighted_char_semantic_statistical = char_semantic_statistical * pa_weight
-                    weighted_sentence = sentence_embeddings * sentence_weight
-                    
-                    # 重新组合特征，保持句子复杂度特征权重不变
-                    weighted_original = np.concatenate([weighted_char_semantic_statistical, complexity_part], axis=1)
-                else:
-                    # 没有复杂度特征时的处理逻辑
-                    weighted_original = original_features * pa_weight
-                    weighted_sentence = sentence_embeddings * sentence_weight
-                
-                logger.info(f"加权融合: original={weighted_original.shape}, sentence={weighted_sentence.shape}")
-                
-                # 拼接加权特征
-                combined_features = np.concatenate([weighted_original, weighted_sentence], axis=1)
-                logger.info(f"批量句向量融合成功，最终维度: {combined_features.shape}")
-            else:
-                # 默认拼接融合 - 传递句子复杂度特征
-                original_features = self._original_hierarchical_fusion(
-                    char_features, semantic_features, statistical_features, complexity_features
-                )
-                logger.info(f"原有特征融合完成，维度: {original_features.shape}")
-                combined_features = np.concatenate([original_features, sentence_embeddings], axis=1)
-                logger.info(f"批量句向量融合成功，最终维度: {combined_features.shape}")
+            logger.info(f"pa_feature句向量融合权重: sentence_weight={sentence_weight}")
+            
+            # 原有特征融合 - 传递句子复杂度特征（这里已经应用了pa_feature_weights）
+            original_features = self._original_hierarchical_fusion(
+                char_features, semantic_features, statistical_features, complexity_features
+            )
+            logger.info(f"原有特征融合完成，维度: {original_features.shape}")
+            
+            # 对句向量应用权重
+            weighted_sentence = sentence_embeddings * sentence_weight
+            
+            logger.info(f"加权融合: original={original_features.shape}, sentence={weighted_sentence.shape}")
+            
+            # 拼接加权特征
+            combined_features = np.concatenate([original_features, weighted_sentence], axis=1)
+            logger.info(f"批量句向量融合成功，最终维度: {combined_features.shape}")
             
             return combined_features
         except Exception as e:

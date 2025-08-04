@@ -154,11 +154,11 @@ class ComplexityCalculator:
 
 
 class ComplexityFeatureExtractor:
-    """复杂度特征提取器"""
+    """句子复杂度特征提取器"""
     
     def __init__(self, config: Dict[str, Any]):
         """
-        初始化复杂度特征提取器
+        初始化句子复杂度特征提取器
         
         Args:
             config: 配置字典
@@ -168,13 +168,13 @@ class ComplexityFeatureExtractor:
     
     def extract_complexity_features(self, texts: List[str]) -> np.ndarray:
         """
-        提取复杂度特征
+        提取句子复杂度特征
         
         Args:
             texts: 文本列表
             
         Returns:
-            复杂度特征矩阵
+            句子复杂度特征矩阵
         """
         if not texts:
             return np.array([]).reshape(0, 1)
@@ -188,13 +188,13 @@ class ComplexityFeatureExtractor:
     
     def extract_single_complexity_feature(self, text: str) -> np.ndarray:
         """
-        提取单个文本的复杂度特征
+        提取单个文本的句子复杂度特征
         
         Args:
             text: 单个文本
             
         Returns:
-            复杂度特征向量
+            句子复杂度特征向量
         """
         complexity = self.complexity_calculator.calculate(text)
         return np.array([complexity]) 

@@ -28,12 +28,12 @@ slot_feature:
 
 # ===================== 高级特征提取器配置 =====================
 advanced_feature:
-  # 增强特征配置
+  # 句向量融合配置
   enhanced:
-    use_sentence_embedding: true  # 是否使用句向量
+    use_sentence_embedding: true  # 是否使用句向量融合
     sentence_model: "shibing624/text2vec-base-chinese"  # 句向量模型
     fusion_method: "weighted"  # 特征融合方法：concatenate=拼接，weighted=加权
-    pa_weight: 0.7  # Position Aware特征权重
+    pa_weight: 0.7  # Position-Aware特征权重（字符+语义+统计+句子复杂度特征）
     sentence_weight: 0.3  # 句向量特征权重
     # 网络配置
     network_timeout: 30  # 网络超时时间（秒）
@@ -44,14 +44,14 @@ advanced_feature:
   vocab_dir: "dict/wh40k_vocabulary"  # WH40K词汇表目录
   basic_keywords: ["战锤", "40k", "wh40k"]  # 基本关键词列表
   
-  # TF-IDF特征配置
+  # TF-IDF特征配置（字符级特征）
   tfidf:
     max_features: 1500  # 最大特征数（增加）
     ngram_range: [1, 3] # ngram范围（增加三元组）
     min_df: 1           # 最小文档频率
     analyzer: char       # 分析粒度
   
-  # 复杂度计算配置
+  # 句子复杂度计算配置
   complexity:
     max_sentence_length: 20.0  # 最大句子长度阈值
     long_word_threshold: 4     # 长词长度阈值
@@ -62,9 +62,9 @@ advanced_feature:
     weight_long_word: 0.25     # 长词复杂度权重
     weight_punctuation: 0.25   # 标点符号复杂度权重
   
-  # 语义复杂度特征配置开关, 如果不打开那么系统只使用feature_weights 中的前三个(char,sementic,statistical_features)
+  # 句子复杂度特征开关
   complexity_feature:
-    enabled: true              # 是否启用复杂度特征
+    enabled: true              # 是否启用句子复杂度特征
   
   # 统计特征配置
   statistical:
@@ -80,10 +80,10 @@ advanced_feature:
   
   # 特征融合权重配置
   feature_weights:
-    char_features: 1.0      # TF-IDF特征权重
-    semantic_features: 3.0  # 语义特征权重（提高，充分利用句向量）
-    statistical_features: 1.5  # 统计特征权重（适度提高）
-    complexity_features: 5.0  # 复杂度特征权重（从1.0增加到5.0）
+    char_features: 1.0      # TF-IDF字符特征权重
+    semantic_features: 3.0  # 语义特征权重（关键词匹配）
+    statistical_features: 1.5  # 统计特征权重（长度、标点等）
+    complexity_features: 10.0  # 句子复杂度特征权重
   
   # 意图关键词配置
   intent_keywords:

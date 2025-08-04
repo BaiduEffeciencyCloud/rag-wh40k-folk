@@ -1,9 +1,17 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-高级特征提取器
-提供更丰富的特征提取功能
+Advanced特征提取器
 """
 
 import os
+import sys
+import warnings
+
+# 抑制torch相关的FutureWarning
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+warnings.filterwarnings("ignore", category=FutureWarning, module="torch")
+
 import json
 import logging
 import numpy as np
@@ -361,8 +369,8 @@ class AdvancedFeature(BaseFeatureExtractor):
     
     # ========== 新增句向量支持方法骨架 ==========
     
-    def get_sentence_embedding(self, sentence: str) -> np.ndarray:
-        """获取句向量特征（仅训练时使用）"""
+    def get_sentence_embedding(self, sentences: List[str]) -> np.ndarray:
+        """获取批量句向量特征（仅训练时使用）"""
         if not hasattr(self, 'sentence_model'):
             try:
                 from sentence_transformers import SentenceTransformer
@@ -370,19 +378,23 @@ class AdvancedFeature(BaseFeatureExtractor):
                 logger.info("句向量模型加载成功")
             except ImportError:
                 logger.warning("sentence-transformers未安装，使用零向量代替")
-                return np.zeros(768)
+                return np.zeros((len(sentences), 768))
             except Exception as e:
                 logger.error(f"句向量模型加载失败: {e}")
-                return np.zeros(768)
+                return np.zeros((len(sentences), 768))
+        
+        # 处理空列表
+        if len(sentences) == 0:
+            return np.zeros((0, 768))
         
         try:
-            logger.info(f"开始提取句向量特征，文本: {sentence[:30]}...")
-            embedding = self.sentence_model.encode([sentence])
-            logger.info(f"句向量提取成功，维度: {embedding.shape}")
-            return embedding[0]  # 返回768维向量
+            logger.info(f"开始提取批量句向量特征，样本数: {len(sentences)}")
+            embeddings = self.sentence_model.encode(sentences, batch_size=64, show_progress_bar=True)
+            logger.info(f"批量句向量提取成功，维度: {embeddings.shape}")
+            return embeddings  # 返回(N, 768)矩阵
         except Exception as e:
-            logger.error(f"句向量提取失败: {e}")
-            return np.zeros(768)
+            logger.error(f"批量句向量提取失败: {e}")
+            return np.zeros((len(sentences), 768))
     
     def get_enhanced_intent_features(self, sentence: str) -> np.ndarray:
         """双路特征融合"""

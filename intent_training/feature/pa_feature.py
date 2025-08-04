@@ -177,24 +177,24 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
                            semantic_features: np.ndarray, 
                            statistical_features: np.ndarray,
                            complexity_features: np.ndarray = None,
-                           original_text: str = None) -> np.ndarray:
+                           original_texts: List[str] = None) -> np.ndarray:
         """分层特征融合"""
         # 检查配置决定是否使用句向量
         enhanced_config = self.config.get('advanced_feature', {}).get('enhanced', {})
         use_sentence_embedding = enhanced_config.get('use_sentence_embedding', False)
         
-        if use_sentence_embedding and original_text:
-            # 句向量融合路径
+        if use_sentence_embedding and original_texts:
+            # 批量句向量融合路径
             try:
-                # 获取句向量
-                sentence_embedding = self.get_sentence_embedding(original_text)
+                # 获取批量句向量
+                sentence_embeddings = self.get_sentence_embedding(original_texts)
                 
-                # 调用句向量融合方法 - 传递复杂度特征
+                # 调用批量句向量融合方法 - 传递复杂度特征
                 return self._sentence_embedding_fusion(
-                    char_features, semantic_features, statistical_features, sentence_embedding, complexity_features
+                    char_features, semantic_features, statistical_features, sentence_embeddings, complexity_features
                 )
             except Exception as e:
-                logger.warning(f"句向量融合失败，回退到原有逻辑: {e}")
+                logger.warning(f"批量句向量融合失败，回退到原有逻辑: {e}")
                 # 回退到原有逻辑 - 传递复杂度特征
                 return self._original_hierarchical_fusion(
                     char_features, semantic_features, statistical_features, complexity_features
@@ -228,7 +228,7 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         # 第二层：与字符特征融合
         final_features = np.concatenate([weighted_char_features, semantic_statistical], axis=1)
         
-        # 第三层：与复杂度特征融合（如果启用）
+        # 第三层：与句子复杂度特征融合（如果启用）
         if complexity_features is not None and complexity_features.shape[1] > 0:
             weighted_complexity_features = complexity_features * complexity_weight
             final_features = np.concatenate([final_features, weighted_complexity_features], axis=1)
@@ -270,15 +270,15 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         
     def _extract_complexity_features(self, texts: List[str]) -> np.ndarray:
         """
-        提取复杂度特征（独立特征层）
+        提取句子复杂度特征（独立特征层）
         
         Args:
             texts: 文本列表
             
         Returns:
-            复杂度特征矩阵
+            句子复杂度特征矩阵
         """
-        # 检查是否启用复杂度特征
+        # 检查是否启用句子复杂度特征
         complexity_config = self.config.get('advanced_feature', {}).get('complexity_feature', {})
         enabled = complexity_config.get('enabled', True)  # 默认启用
         
@@ -323,7 +323,7 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         # 提取统计特征
         statistical_features = self._extract_statistical_features(texts)
         
-        # 提取复杂度特征
+        # 提取句子复杂度特征
         complexity_features = self._extract_complexity_features(texts)
         
         # 特征融合 - 只在启用句向量时传递原始文本
@@ -333,7 +333,7 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         if use_sentence_embedding and texts:
             fused_features = self.hierarchical_fusion(
                 char_features, semantic_features, statistical_features, complexity_features,
-                original_text=texts[0]
+                original_texts=texts
             )
         else:
             fused_features = self.hierarchical_fusion(
@@ -342,8 +342,8 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         
         return fused_features
     
-    def get_sentence_embedding(self, sentence: str) -> np.ndarray:
-        """获取句向量特征"""
+    def get_sentence_embedding(self, sentences: List[str]) -> np.ndarray:
+        """获取批量句向量特征"""
         if not hasattr(self, 'sentence_model'):
             try:
                 from sentence_transformers import SentenceTransformer
@@ -366,32 +366,36 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
                 
             except ImportError:
                 logger.warning("sentence-transformers未安装，使用零向量代替")
-                return np.zeros(768)
+                return np.zeros((len(sentences), 768))
             except Exception as e:
                 logger.error(f"句向量模型加载失败: {e}")
                 if fallback_to_zero:
                     logger.warning("将使用零向量代替句向量特征")
                     # 设置一个标志，避免重复尝试加载
                     self.sentence_model = None
-                    return np.zeros(768)
+                    return np.zeros((len(sentences), 768))
                 else:
                     # 如果不允许回退，则抛出异常
                     raise e
         
         # 如果模型加载失败，直接返回零向量
         if self.sentence_model is None:
-            return np.zeros(768)
+            return np.zeros((len(sentences), 768))
+        
+        # 处理空列表
+        if len(sentences) == 0:
+            return np.zeros((0, 768))
         
         try:
-            logger.info(f"开始提取句向量特征，文本: {sentence[:30]}...")
-            embedding = self.sentence_model.encode([sentence])
-            logger.info(f"句向量提取成功，维度: {embedding.shape}")
-            return embedding[0]  # 返回768维向量
+            logger.info(f"开始提取批量句向量特征，样本数: {len(sentences)}")
+            embeddings = self.sentence_model.encode(sentences, batch_size=64, show_progress_bar=True)
+            logger.info(f"批量句向量提取成功，维度: {embeddings.shape}")
+            return embeddings  # 返回(N, 768)矩阵
         except Exception as e:
-            logger.error(f"句向量提取失败: {e}")
+            logger.error(f"批量句向量提取失败: {e}")
             if fallback_to_zero:
                 logger.warning("使用零向量作为兜底")
-                return np.zeros(768)
+                return np.zeros((len(sentences), 768))
             else:
                 # 如果不允许回退，则抛出异常
                 raise e
@@ -408,9 +412,12 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
             # 提取统计特征
             statistical_features = self._extract_statistical_features([sentence])
             
-            # 特征融合 - 传递原始文本
+            # 提取句子复杂度特征
+            complexity_features = self._extract_complexity_features([sentence])
+            
+            # 特征融合 - 传递原始文本和复杂度特征
             fused_features = self.hierarchical_fusion(
-                char_features, semantic_features, statistical_features, original_text=sentence
+                char_features, semantic_features, statistical_features, complexity_features, original_texts=[sentence]
             )
             
             return fused_features
@@ -422,12 +429,12 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
     def _sentence_embedding_fusion(self, char_features: np.ndarray,
                                   semantic_features: np.ndarray,
                                   statistical_features: np.ndarray,
-                                  sentence_embedding: np.ndarray,
+                                  sentence_embeddings: np.ndarray,
                                   complexity_features: np.ndarray = None) -> np.ndarray:
-        """句向量融合方法"""
+        """批量句向量融合方法"""
         try:
-            logger.info(f"开始句向量融合，特征维度: char={char_features.shape}, semantic={semantic_features.shape}, statistical={statistical_features.shape}, complexity={complexity_features.shape if complexity_features is not None else 'None'}")
-            logger.info(f"句向量维度: {sentence_embedding.shape}")
+            logger.info(f"开始批量句向量融合，特征维度: char={char_features.shape}, semantic={semantic_features.shape}, statistical={statistical_features.shape}, complexity={complexity_features.shape if complexity_features is not None else 'None'}")
+            logger.info(f"批量句向量维度: {sentence_embeddings.shape}")
             
             # 获取融合方法配置
             enhanced_config = self.config.get('advanced_feature', {}).get('enhanced', {})
@@ -438,33 +445,60 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
                 pa_weight = enhanced_config.get('pa_weight', 0.6)
                 sentence_weight = enhanced_config.get('sentence_weight', 0.4)
                 
-                # 原有特征融合 - 传递复杂度特征
+                # 原有特征融合 - 传递句子复杂度特征
                 original_features = self._original_hierarchical_fusion(
                     char_features, semantic_features, statistical_features, complexity_features
                 )
                 logger.info(f"原有特征融合完成，维度: {original_features.shape}")
                 
-                # 加权融合
-                weighted_original = original_features * pa_weight
-                weighted_sentence = sentence_embedding.reshape(1, -1) * sentence_weight
+                # 检查复杂度特征是否为空
+                if complexity_features is not None and complexity_features.shape[1] > 0:
+                    # 有复杂度特征时的处理逻辑
+                    char_dim = char_features.shape[1]
+                    semantic_dim = semantic_features.shape[1]
+                    statistical_dim = statistical_features.shape[1]
+                    complexity_dim = complexity_features.shape[1]
+                    
+                    # 计算各特征在original_features中的位置
+                    char_end = char_dim
+                    semantic_end = char_end + semantic_dim
+                    statistical_end = semantic_end + statistical_dim
+                    complexity_start = statistical_end
+                    complexity_end = statistical_end + complexity_dim
+                    
+                    # 分离特征
+                    char_semantic_statistical = original_features[:, :complexity_start]
+                    complexity_part = original_features[:, complexity_start:complexity_end]
+                    
+                    # 只对非句子复杂度特征应用句向量权重
+                    weighted_char_semantic_statistical = char_semantic_statistical * pa_weight
+                    weighted_sentence = sentence_embeddings * sentence_weight
+                    
+                    # 重新组合特征，保持句子复杂度特征权重不变
+                    weighted_original = np.concatenate([weighted_char_semantic_statistical, complexity_part], axis=1)
+                else:
+                    # 没有复杂度特征时的处理逻辑
+                    weighted_original = original_features * pa_weight
+                    weighted_sentence = sentence_embeddings * sentence_weight
+                
                 logger.info(f"加权融合: original={weighted_original.shape}, sentence={weighted_sentence.shape}")
                 
                 # 拼接加权特征
                 combined_features = np.concatenate([weighted_original, weighted_sentence], axis=1)
-                logger.info(f"句向量融合成功，最终维度: {combined_features.shape}")
+                logger.info(f"批量句向量融合成功，最终维度: {combined_features.shape}")
             else:
-                # 默认拼接融合 - 传递复杂度特征
+                # 默认拼接融合 - 传递句子复杂度特征
                 original_features = self._original_hierarchical_fusion(
                     char_features, semantic_features, statistical_features, complexity_features
                 )
                 logger.info(f"原有特征融合完成，维度: {original_features.shape}")
-                combined_features = np.concatenate([original_features, sentence_embedding.reshape(1, -1)], axis=1)
-                logger.info(f"句向量融合成功，最终维度: {combined_features.shape}")
+                combined_features = np.concatenate([original_features, sentence_embeddings], axis=1)
+                logger.info(f"批量句向量融合成功，最终维度: {combined_features.shape}")
             
             return combined_features
         except Exception as e:
-            logger.error(f"句向量融合失败: {e}")
-            # 回退到原有融合 - 传递复杂度特征
+            logger.error(f"批量句向量融合失败: {e}")
+            # 回退到原有融合 - 传递句子复杂度特征
             return self._original_hierarchical_fusion(
                 char_features, semantic_features, statistical_features, complexity_features
             )

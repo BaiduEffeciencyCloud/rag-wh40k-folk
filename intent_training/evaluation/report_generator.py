@@ -57,6 +57,27 @@ class ReportGenerator:
 |---|---|---|
 | {slot_metrics.get("precision", 0):.4f} | {slot_metrics.get("recall", 0):.4f} | **{slot_metrics.get("f1-score", 0):.4f}** |
 """
+
+        # 添加混淆矩阵部分
+        if "confusion_matrix" in summary_data:
+            confusion_matrix = summary_data["confusion_matrix"]
+            labels = confusion_matrix.get("labels", [])
+            matrix = confusion_matrix.get("matrix", [])
+            
+            if labels and matrix:
+                content += "\n## 意图混淆矩阵\n\n"
+                content += "| 预测 \\ 真实 |"
+                for label in labels:
+                    content += f" **{label}** |"
+                content += "\n|---|---"
+                content += "|" * len(labels)
+                content += "\n"
+                
+                for i, row in enumerate(matrix):
+                    content += f"| **{labels[i]}** |"
+                    for val in row:
+                        content += f" {val} |"
+                    content += "\n"
         with open(report_path, 'w', encoding='utf-8') as f:
             f.write(content)
 

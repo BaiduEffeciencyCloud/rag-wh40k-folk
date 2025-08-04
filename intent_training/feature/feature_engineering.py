@@ -3,10 +3,13 @@ import numpy as np
 from typing import List, Dict, Any
 from sklearn.feature_extraction.text import TfidfVectorizer
 import logging
+import joblib
+import os
+from intent_training.feature.base import BaseFeatureExtractor
 
 logger = logging.getLogger(__name__)
 
-class IntentFeatureExtractor:
+class IntentFeatureExtractor(BaseFeatureExtractor):
     """意图识别特征提取器"""
     
     def __init__(self, config: Dict[str, Any]):
@@ -73,6 +76,31 @@ class IntentFeatureExtractor:
         """
         self.fit(X)
         return self.transform(X)
+    
+    def save(self, path: str):
+        """保存特征提取器"""
+        if not self.is_fitted:
+            raise ValueError("特征提取器尚未训练，无法保存")
+        
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        joblib.dump(self.tfidf_vectorizer, path)
+        logger.info(f"特征提取器已保存到: {path}")
+    
+    def load(self, path: str):
+        """加载特征提取器"""
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"特征提取器文件不存在: {path}")
+        
+        self.tfidf_vectorizer = joblib.load(path)
+        self.is_fitted = True
+        logger.info(f"特征提取器已从 {path} 加载")
+    
+    def get_feature_dim(self) -> int:
+        """获取特征维度"""
+        if not self.is_fitted:
+            raise ValueError("特征提取器尚未训练")
+        
+        return self.tfidf_vectorizer.get_feature_names_out().shape[0]
 
 class SlotFeatureExtractor:
     """槽位填充特征提取器"""

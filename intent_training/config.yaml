@@ -13,6 +13,8 @@ min_sentence_length: 2   # 槽位句子最小长度
 max_sentence_length: 100 # 槽位句子最大长度
 
 # ===================== 特征工程参数 =====================
+feature_type: pa  # 特征提取器类型：basic=基础特征，advanced=高级特征，pa=Position-Aware特征
+use_enhanced_features: true  # 是否使用增强特征（句向量融合）
 intent_feature:
   max_features: 1000  # TF-IDF最大特征数
   ngram_range: [1, 2] # ngram范围，(1,2)表示1-2gram
@@ -26,14 +28,26 @@ slot_feature:
 
 # ===================== 高级特征提取器配置 =====================
 advanced_feature:
+  # 增强特征配置
+  enhanced:
+    use_sentence_embedding: true  # 是否使用句向量
+    sentence_model: "shibing624/text2vec-base-chinese"  # 句向量模型
+    fusion_method: "weighted"  # 特征融合方法：concatenate=拼接，weighted=加权
+    pa_weight: 0.7  # Position Aware特征权重
+    sentence_weight: 0.3  # 句向量特征权重
+    # 网络配置
+    network_timeout: 30  # 网络超时时间（秒）
+    allow_offline: true  # 是否允许离线模式
+    fallback_to_zero: true  # 网络失败时是否回退到零向量
+  
   # 路径配置
   vocab_dir: "dict/wh40k_vocabulary"  # WH40K词汇表目录
   basic_keywords: ["战锤", "40k", "wh40k"]  # 基本关键词列表
   
   # TF-IDF特征配置
   tfidf:
-    max_features: 1000  # 最大特征数
-    ngram_range: [1, 2] # ngram范围
+    max_features: 1500  # 最大特征数（增加）
+    ngram_range: [1, 3] # ngram范围（增加三元组）
     min_df: 1           # 最小文档频率
     analyzer: char       # 分析粒度
   
@@ -48,6 +62,10 @@ advanced_feature:
     weight_long_word: 0.25     # 长词复杂度权重
     weight_punctuation: 0.25   # 标点符号复杂度权重
   
+  # 语义复杂度特征配置开关, 如果不打开那么系统只使用feature_weights 中的前三个(char,sementic,statistical_features)
+  complexity_feature:
+    enabled: true              # 是否启用复杂度特征
+  
   # 统计特征配置
   statistical:
     long_word_threshold: 4     # 长词长度阈值
@@ -56,10 +74,16 @@ advanced_feature:
   # 标点符号配置
   punctuation:
     question_exclamation: "？？!！"  # 问号感叹号
-    quotes: '""'''              # 引号
     brackets: "（）【】"         # 括号
     others: "：；，。"          # 其他标点
-    all_punctuation: "，。！？；：""''（）【】"  # 所有标点符号
+    all_punctuation: "，。！？；：（）【】"  # 所有标点符号
+  
+  # 特征融合权重配置
+  feature_weights:
+    char_features: 1.0      # TF-IDF特征权重
+    semantic_features: 3.0  # 语义特征权重（提高，充分利用句向量）
+    statistical_features: 1.5  # 统计特征权重（适度提高）
+    complexity_features: 5.0  # 复杂度特征权重（从1.0增加到5.0）
   
   # 意图关键词配置
   intent_keywords:
@@ -103,6 +127,11 @@ advanced_feature:
       - "怎么触发"
       - "怎么计算"
       - "是啥"
+      - "告诉我"
+      - "我想知道"
+      - "帮我查一下"
+      - "请解释"
+      - "能否说明"
     rule:
       - "什么情况下"
       - "如何触发"
@@ -116,6 +145,11 @@ advanced_feature:
       - "什么条件"
       - "什么要求"
       - "什么限制"
+      - "如果...那么"
+      - "当...的时候"
+      - "在...的情况下"
+      - "需要满足"
+      - "必须满足"
 
 # ===================== 模型文件名配置 =====================
 model:
@@ -123,9 +157,44 @@ model:
   sequence_slot_filler: sequence_slot_filler.pkl  # 序列槽位填充器模型文件名
 
 # ===================== 分类器参数 =====================
-classifier_type: logistic   # 分类器类型，可选logistic/svm/random_forest
-max_iter: 1000              # 最大迭代次数
-n_estimators: 100           # 随机森林树数
+classifier:
+  type: logistic   # 分类器类型：logistic(逻辑回归)/svm(支持向量机)/random_forest(随机森林)/ensemble(集成学习)
+  random_state: 42  # 随机种子
+  
+  # Logistic Regression参数
+  logistic:
+    max_iter: 1000
+    C: 1.0
+    penalty: l2
+    solver: lbfgs
+    
+  # SVM参数
+  svm:
+    C: 1.0
+    kernel: rbf
+    gamma: scale
+    probability: true
+    max_iter: 1000
+    
+  # Random Forest参数
+  random_forest:
+    n_estimators: 100
+    max_depth: 10
+    min_samples_split: 2
+    min_samples_leaf: 1
+    
+  # 集成学习参数
+  ensemble:
+    base_classifiers: [logistic, svm, random_forest]
+    voting_method: soft  # soft/hard
+    weights: [0.4, 0.3, 0.3]  # 各分类器权重
+    
+  # 类别权重（用于处理不平衡数据）
+  class_weights:
+    Query: 2.5    # 提升Query权重（当前准确率低）
+    List: 1.0     # 保持List权重（当前准确率高）
+    Compare: 1.5  # 适度提升Compare权重
+    Rule: 1.2     # 适度提升Rule权重
 
 slot_buffer_max_size: 1000  # 槽位缓存最大长度
 slot_classifier_type: logistic # 槽位分类器类型

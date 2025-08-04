@@ -21,8 +21,8 @@ class Evaluator:
 
         Args:
             model (Any): 训练好的模型对象。该对象必须包含一个 `predict` 方法，
-                         其签名应为: `predict(self, texts: List[str]) -> Tuple[List[str], List[List[str]]]`
-                         分别返回意图列表和槽位标签列表。
+                         其签名应为: `predict(self, texts: List[str]) -> Tuple[List[str], List[List[str]], List[Dict[str, float]]]`
+                         分别返回意图列表、槽位标签列表和意图置信度字典列表。
             config (Dict[str, Any]): 评估配置，应包含报告输出路径。
                                      e.g., {"summary_report_path": "reports/summary.md",
                                             "detailed_report_path": "reports/detailed.json"}
@@ -50,7 +50,7 @@ class Evaluator:
             float: Frame Accuracy 分数，作为评估的主要返回值。
         """
         # 1. 使用模型进行预测
-        pred_intents, pred_slots = self.model.predict(texts)
+        pred_intents, pred_slots, intent_confidences = self.model.predict(texts)
 
         # 2. 计算各项指标
         intent_accuracy = self.metric_calculator.calculate_intent_accuracy(true_intents, pred_intents)
@@ -80,9 +80,10 @@ class Evaluator:
                         "pred_intent": pred_intent,
                         "true_slots": true_slot,
                         "pred_slots": pred_slot,
+                        "intent_confidences": intent_confidence,  # 添加置信度信息
                     }
-                    for text, true_intent, pred_intent, true_slot, pred_slot in zip(
-                        texts, true_intents, pred_intents, true_slots, pred_slots
+                    for text, true_intent, pred_intent, true_slot, pred_slot, intent_confidence in zip(
+                        texts, true_intents, pred_intents, true_slots, pred_slots, intent_confidences
                     )
                 ]
             }

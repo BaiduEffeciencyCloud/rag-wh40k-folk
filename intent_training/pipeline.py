@@ -13,6 +13,7 @@ import joblib
 import argparse
 import sys
 import logging
+import numpy as np
 
 class IntentTraining:
     def __init__(self, model_output_root, raw_dir, config_path):
@@ -299,11 +300,37 @@ class IntentTraining:
             self.logger.info("[pipeline] 特征工程阶段开始")
             feature_dir = self.dirs['feature']
             os.makedirs(feature_dir, exist_ok=True)
-            intent_feat = IntentFeatureExtractor(config)
+            
+            # 使用工厂创建特征提取器
+            from intent_training.feature.factory import FeatureExtractorFactory
+            intent_feat = FeatureExtractorFactory.create_feature_extractor(config)
+            
             X_train = split_result['intent']['train'][0]
-            intent_feat.fit(X_train)
-            intent_tfidf_name = config.get('feature', {}).get('intent_tfidf', 'intent_tfidf.pkl')
-            joblib.dump(intent_feat.tfidf_vectorizer, os.path.join(feature_dir, intent_tfidf_name))
+            y_train = split_result['intent']['train'][1]
+            
+            # 检查是否使用增强特征
+            use_enhanced = FeatureExtractorFactory.is_enhanced_feature_extractor(config)
+            
+            if use_enhanced:
+                self.logger.info("[pipeline] 使用增强特征训练意图分类器")
+                # 使用增强特征训练
+                intent_feat.fit(X_train)
+                # 注意：这里不训练分类器，分类器训练在模型训练阶段进行
+                
+                # 保存增强特征提取器（使用现有命名约定）
+                intent_tfidf_name = config.get('intent_feature', {}).get('intent_tfidf', 'intent_tfidf.pkl')
+                intent_feat.save_enhanced_feature_extractor(os.path.join(feature_dir, intent_tfidf_name))
+                
+                self.logger.info(f"[pipeline] 增强特征提取器已保存: {intent_tfidf_name}")
+            else:
+                self.logger.info("[pipeline] 使用基础特征训练")
+                # 使用基础特征训练
+                intent_feat.fit(X_train)
+                
+                # 保存基础特征提取器
+                intent_tfidf_name = config.get('intent_feature', {}).get('intent_tfidf', 'intent_tfidf.pkl')
+                intent_feat.save(os.path.join(feature_dir, intent_tfidf_name))
+            
             self.logger.info("[pipeline] 特征工程完成")
         except Exception as e:
             self.logger.error(f"特征工程异常: {e}")
@@ -315,21 +342,48 @@ class IntentTraining:
             self.logger.info("[pipeline] 模型训练阶段开始")
             model_dir = self.dirs['model']
             os.makedirs(model_dir, exist_ok=True)
-            y_train = split_result['intent']['train'][1]
-            X_train_vec = intent_feat.transform(X_train)
-            intent_clf = IntentClassifier(config)
-            intent_clf.fit(X_train_vec, y_train)
-            intent_clf_name = config.get('model', {}).get('intent_classifier', 'intent_classifier.pkl')
-            intent_clf.save_model(os.path.join(model_dir, intent_clf_name))
-            self.logger.info(f"[pipeline] 意图分类器训练完成: {intent_clf_name}")
+            
+            # 根据是否使用增强特征选择训练方式
+            if use_enhanced:
+                self.logger.info("[pipeline] 使用增强特征进行意图分类器训练")
+                # 使用增强特征训练意图分类器
+                X_train_enhanced = []
+                for sentence in X_train:
+                    enhanced_features = intent_feat.get_enhanced_intent_features(sentence)
+                    X_train_enhanced.append(enhanced_features.flatten())
+                X_train_enhanced = np.array(X_train_enhanced)
+                
+                # 使用与基础模式相同的方法
+                intent_clf = IntentClassifier(config)
+                intent_clf.fit(X_train_enhanced, y_train)
+                intent_clf_name = config.get('model', {}).get('intent_classifier', 'intent_classifier.pkl')
+                intent_clf.save_model(os.path.join(model_dir, intent_clf_name))
+                self.logger.info(f"[pipeline] 增强意图分类器训练完成: {intent_clf_name}")
+            else:
+                self.logger.info("[pipeline] 使用基础特征进行意图分类器训练")
+                X_train_vec = intent_feat.transform(X_train)
+                intent_clf = IntentClassifier(config)
+                intent_clf.fit(X_train_vec, y_train)
+                intent_clf_name = config.get('model', {}).get('intent_classifier', 'intent_classifier.pkl')
+                intent_clf.save_model(os.path.join(model_dir, intent_clf_name))
+                self.logger.info(f"[pipeline] 意图分类器训练完成: {intent_clf_name}")
+            
             # 槽位填充器训练 - 使用意图分类器预测真实意图
             slot_train_sents, slot_train_labels = split_result['slot']['train']
             slotfiller = SequenceSlotFiller(config)
             slot_train_data = []
             for sent, label_seq in zip(slot_train_sents, slot_train_labels):
                 query = "".join(sent)
-                query_vec = intent_feat.transform([query])
-                predicted_intent = intent_clf.predict(query_vec)[0]
+                if use_enhanced:
+                    # 使用增强特征预测意图 - 使用独立的分类器对象
+                    enhanced_features = intent_feat.get_enhanced_intent_features(query)
+                    enhanced_features = enhanced_features.flatten().reshape(1, -1)
+                    predicted_intent = intent_clf.predict(enhanced_features)[0]
+                else:
+                    # 使用基础特征预测意图
+                    query_vec = intent_feat.transform([query])
+                    predicted_intent = intent_clf.predict(query_vec)[0]
+                
                 extracted_slots = self._extract_slots_from_conll(sent, label_seq)
                 slot_train_data.append({
                     "query": query, 

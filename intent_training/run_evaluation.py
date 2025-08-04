@@ -11,14 +11,15 @@ from intent_training.data.data_manager import DataManager
 from intent_training.evaluation.evaluator import Evaluator
 from intent_training.model.intent_classifier import IntentClassifier
 from intent_training.model.sequence_slot_filler import SequenceSlotFiller
-from intent_training.feature.feature_engineering import IntentFeatureExtractor
+from intent_training.feature.factory import FeatureExtractorFactory
 
 class IntegratedModel:
     """一个包装类，用于将意图和槽位模型统一成Evaluator所需的单一predict接口"""
-    def __init__(self, intent_clf, slot_filler, feature_extractor):
+    def __init__(self, intent_clf, slot_filler, feature_extractor, use_enhanced=False):
         self.intent_clf = intent_clf
         self.slot_filler = slot_filler
         self.feature_extractor = feature_extractor
+        self.use_enhanced = use_enhanced
         self.tokenized_texts = None
 
     def predict(self, texts, tokenized_texts=None):
@@ -30,10 +31,39 @@ class IntegratedModel:
             tokenized_texts: 预定义的分词结果列表，如果为None则使用jieba分词
             
         Returns:
-            tuple: (intent_preds, slot_preds) 意图预测结果和槽位预测结果
+            tuple: (intent_preds, slot_preds, intent_confidences) 意图预测结果、槽位预测结果和意图置信度
         """
         # 意图预测
-        intent_preds = self.intent_clf.predict(self.feature_extractor.transform(texts))
+        if self.use_enhanced:
+            # 使用增强特征预测意图
+            intent_preds = []
+            intent_confidences = []
+            for text in texts:
+                # 获取增强特征
+                enhanced_features = self.feature_extractor.get_enhanced_intent_features(text)
+                enhanced_features = enhanced_features.flatten().reshape(1, -1)
+                # 使用加载的分类器进行预测
+                intent = self.intent_clf.predict(enhanced_features)[0]
+                # 获取预测概率
+                probabilities = self.intent_clf.predict_proba(enhanced_features)[0]
+                # 创建置信度字典
+                confidence_dict = {}
+                for i, class_name in enumerate(self.intent_clf.classes_):
+                    confidence_dict[class_name] = float(probabilities[i])
+                intent_preds.append(intent)
+                intent_confidences.append(confidence_dict)
+        else:
+            # 使用基础特征预测意图
+            intent_preds = self.intent_clf.predict(self.feature_extractor.transform(texts))
+            # 获取预测概率
+            probabilities = self.intent_clf.predict_proba(self.feature_extractor.transform(texts))
+            # 创建置信度字典列表
+            intent_confidences = []
+            for prob in probabilities:
+                confidence_dict = {}
+                for i, class_name in enumerate(self.intent_clf.classes_):
+                    confidence_dict[class_name] = float(prob[i])
+                intent_confidences.append(confidence_dict)
         
         # 槽位预测
         slot_preds_data = [{"query": text, "intent": intent} for text, intent in zip(texts, intent_preds)]
@@ -85,7 +115,7 @@ class IntegratedModel:
             
             formatted_slot_preds.append(token_labels)
 
-        return intent_preds, formatted_slot_preds
+        return intent_preds, formatted_slot_preds, intent_confidences
 
 def find_model_version_path(model_root, version):
     """根据version参数查找模型路径"""
@@ -114,16 +144,31 @@ def load_dependencies(version_path):
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
 
-        # 加载特征提取器
-        feature_path = os.path.join(version_path, "feature", config['intent_feature']['intent_tfidf'])
-        feature_extractor = IntentFeatureExtractor(config)
-        feature_extractor.tfidf_vectorizer = joblib.load(feature_path)
-        feature_extractor.is_fitted = True # 手动设置is_fitted状态，表示模型已加载
+        # 使用工厂方法创建特征提取器
+        feature_extractor = FeatureExtractorFactory.create_feature_extractor(config)
+        
+        # 检查是否使用增强特征
+        use_enhanced = FeatureExtractorFactory.is_enhanced_feature_extractor(config)
+        
+        if use_enhanced:
+            # 加载增强特征提取器（使用现有命名约定）
+            intent_tfidf_name = config.get('intent_feature', {}).get('intent_tfidf', 'intent_tfidf.pkl')
+            feature_path = os.path.join(version_path, "feature", intent_tfidf_name)
+            feature_extractor.load_enhanced_feature_extractor(feature_path)
+            print(f"加载增强特征提取器: {intent_tfidf_name}")
+        else:
+            # 加载基础特征提取器
+            feature_path = os.path.join(version_path, "feature", config['intent_feature']['intent_tfidf'])
+            feature_extractor.load(feature_path)
+            print(f"加载基础特征提取器: {config['intent_feature']['intent_tfidf']}")
 
         # 加载模型
         model_path = os.path.join(version_path, "model")
+        
+        # 无论基础还是增强特征，都需要加载单独的意图分类器
         intent_clf = IntentClassifier(config)
         intent_clf.load_model(os.path.join(model_path, config['model']['intent_classifier']))
+        print(f"加载意图分类器: {config['model']['intent_classifier']}")
         
         slot_filler = SequenceSlotFiller(config)
         slot_filler.load_model(os.path.join(model_path, config['model']['sequence_slot_filler']))
@@ -133,7 +178,8 @@ def load_dependencies(version_path):
             "config": config,
             "feature_extractor": feature_extractor,
             "intent_clf": intent_clf,
-            "slot_filler": slot_filler
+            "slot_filler": slot_filler,
+            "use_enhanced": use_enhanced
         }
     except Exception as e:
         print(f"错误: 加载依赖失败 - {e}")
@@ -264,7 +310,8 @@ def main():
     integrated_model = IntegratedModel(
         dependencies['intent_clf'],
         dependencies['slot_filler'],
-        dependencies['feature_extractor']
+        dependencies['feature_extractor'],
+        dependencies['use_enhanced']
     )
     evaluator = Evaluator(integrated_model, eval_config, mode="full_analysis")
 

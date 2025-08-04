@@ -23,6 +23,8 @@ models/
 #意图识别模块的产出和原始数据
 intent_training/data/raw
 intent_training/model_output
+intent_training/golden_test/
+intent_training/auto_conll
 # 存放输出文件
 DATAUPLOAD/chunks/
 # 存放测试文件
@@ -34,6 +36,8 @@ report/
 dict/
 #存放测试用query&gold
 test_data/
+#存放临时的分析脚本
+ana/
 # IDE相关
 .idea/
 .vscode/

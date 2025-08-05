@@ -50,10 +50,10 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         }
         
     def _init_secondary_keywords(self) -> Dict[str, List[str]]:
-        """初始化次要关键词"""
+        """初始化次要关键词（移除辅助词汇）"""
         return {
-            'Query': ['查询', '了解', '知道'],
-            'List': ['查看', '浏览', '展示', '显示', '列出', '提供', '给出'],
+            'Query': ['查询', '了解', '知道'],  # 移除辅助词汇
+            'List': ['查看', '浏览', '展示', '显示', '列出', '提供', '给出'],  # 移除辅助词汇
             'Compare': ['对比', '差异', '区别', '不同', '相似', '相同'],
             'Rule': ['规定', '约束', '限制', '允许', '禁止', '可以', '不能']
         }
@@ -67,19 +67,88 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
             'Rule': ['不要求', '不限制', '不必须', '不需要']
         }
         
+    def _init_malicious_patterns(self) -> List[str]:
+        """初始化恶意词汇模式"""
+        return [
+            '我不想知道', '不要告诉我', '别说出来', '不想知道',
+            '别说了', '闭嘴', '不要回答', '别回答',
+            '我不想听', '不要解释', '别解释', '不想了解',
+            '不要说明', '别说明', '不想查询', '不要查询'
+        ]
+        
+    def _init_helper_patterns(self) -> List[str]:
+        """初始化辅助词汇模式"""
+        return [
+            '我想知道', '告诉我', '回答我', '请回答',
+            '帮我查一下', '能否说明', '请解释', '帮我看看',
+            '能否告诉我', '请告诉我', '帮我查询', '能否查询'
+        ]
+        
+    def _contains_malicious_patterns(self, text: str) -> bool:
+        """检测是否包含恶意词汇"""
+        malicious_patterns = getattr(self, 'malicious_patterns', None)
+        if malicious_patterns is None:
+            malicious_patterns = self._init_malicious_patterns()
+        return any(pattern in text for pattern in malicious_patterns)
+        
+    def _contains_helper_patterns(self, text: str) -> bool:
+        """检测是否包含辅助词汇"""
+        helper_patterns = getattr(self, 'helper_patterns', None)
+        if helper_patterns is None:
+            helper_patterns = self._init_helper_patterns()
+        return any(pattern in text for pattern in helper_patterns)
+        
+    def _get_malicious_weight(self, text: str) -> float:
+        """计算恶意词汇权重"""
+        malicious_patterns = getattr(self, 'malicious_patterns', None)
+        if malicious_patterns is None:
+            malicious_patterns = self._init_malicious_patterns()
+        weight = 0.0
+        for pattern in malicious_patterns:
+            if pattern in text:
+                weight += 1.0
+        return weight
+        
+    def _get_helper_context_weight(self, text: str, keyword: str, pos: int) -> float:
+        """计算辅助词汇上下文权重"""
+        helper_patterns = getattr(self, 'helper_patterns', None)
+        if helper_patterns is None:
+            helper_patterns = self._init_helper_patterns()
+        
+        # 检查关键词前后的上下文
+        before = text[max(0, pos-8):pos]
+        after = text[pos+len(keyword):pos+len(keyword)+8]
+        
+        # 如果被辅助词汇包围，降低权重
+        is_helper_context = any(pattern in before for pattern in helper_patterns)
+        
+        if is_helper_context:
+            return 0.3  # 大幅降低权重
+        else:
+            return 1.0  # 正常权重
+        
     def position_weighted_matching(self, query: str, keywords: List[str]) -> float:
         """位置权重匹配"""
         matches = []
         for keyword in keywords:
             if keyword in query:
                 pos = query.find(keyword)
-                # 句子开头权重高，中间权重中等，结尾权重低
-                if pos < len(query) * 0.3:
-                    weight = 1.5  # 开头权重高
-                elif pos > len(query) * 0.7:
-                    weight = 0.8  # 结尾权重低
+                
+                # 检查是否被辅助词汇包围
+                helper_weight = self._get_helper_context_weight(query, keyword, pos)
+                
+                # 如果被辅助词汇包围，降低权重
+                if helper_weight < 1.0:
+                    weight = helper_weight
                 else:
-                    weight = 1.0  # 中间权重正常
+                    # 正常位置权重逻辑
+                    if pos < len(query) * 0.2:
+                        weight = 0.8
+                    elif pos > len(query) * 0.8:
+                        weight = 0.9
+                    else:
+                        weight = 1.2
+                
                 matches.append(weight)
         return sum(matches) if matches else 0.0
         
@@ -119,30 +188,52 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         """提取结构特征"""
         features = []
         
+        # 恶意词汇检测 - 将恶意权重作为现有特征的一部分
+        malicious_weight = self._get_malicious_weight(text)
+        
         # 疑问词特征
         question_words = ['什么', '如何', '为什么', '哪个', '怎么', '哪些']
         question_count = sum(1 for word in question_words if word in text)
+        # 如果恶意词汇存在，降低疑问词权重
+        if malicious_weight > 0:
+            question_count *= 0.1
         features.append(question_count)
         
         # 数量词特征
         quantity_words = ['哪些', '多少个', '多少种', '几个', '多少']
         quantity_count = sum(1 for word in quantity_words if word in text)
+        # 如果恶意词汇存在，降低数量词权重
+        if malicious_weight > 0:
+            quantity_count *= 0.1
         features.append(quantity_count)
         
         # 比较词特征
         comparison_words = ['哪个', '相比', '比较', '更', '最高', '最低', '最远', '最近']
         comparison_count = sum(1 for word in comparison_words if word in text)
+        # 如果恶意词汇存在，降低比较词权重
+        if malicious_weight > 0:
+            comparison_count *= 0.1
         features.append(comparison_count)
         
         # 句子长度特征
-        features.append(len(text))
+        sentence_length = len(text)
+        # 如果恶意词汇存在，降低句子长度权重
+        if malicious_weight > 0:
+            sentence_length *= 0.1
+        features.append(sentence_length)
         
         # 词数特征
         word_count = len(list(jieba.cut(text)))
+        # 如果恶意词汇存在，降低词数权重
+        if malicious_weight > 0:
+            word_count *= 0.1
         features.append(word_count)
         
         # 标点符号特征
         punctuation_count = sum(1 for char in text if char in '，。！？；：""''（）【】')
+        # 如果恶意词汇存在，降低标点符号权重
+        if malicious_weight > 0:
+            punctuation_count *= 0.1
         features.append(punctuation_count)
         
         return np.array(features)
@@ -498,13 +589,16 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             
-            # 保存所有必要的组件
+            # 保存所有必要的组件，包括恶意词相关的方法
             save_data = {
                 'tfidf_vectorizer': self.tfidf_vectorizer,
                 'primary_keywords': self.primary_keywords,
                 'secondary_keywords': self.secondary_keywords,
                 'negative_keywords': self.negative_keywords,
-                'config': self.config
+                'config': self.config,
+                # 添加恶意词相关的方法
+                'malicious_patterns': self._init_malicious_patterns(),
+                'helper_patterns': self._init_helper_patterns()
             }
             
             joblib.dump(save_data, path)
@@ -527,6 +621,19 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
             self.secondary_keywords = save_data['secondary_keywords']
             self.negative_keywords = save_data['negative_keywords']
             self.config = save_data['config']
+            
+            # 加载恶意词相关的方法（如果存在）
+            if 'malicious_patterns' in save_data:
+                self.malicious_patterns = save_data['malicious_patterns']
+            else:
+                # 兼容旧版本，重新初始化恶意词模式
+                self.malicious_patterns = self._init_malicious_patterns()
+                
+            if 'helper_patterns' in save_data:
+                self.helper_patterns = save_data['helper_patterns']
+            else:
+                # 兼容旧版本，重新初始化辅助词模式
+                self.helper_patterns = self._init_helper_patterns()
             
             logger.info(f"增强特征提取器已从 {path} 加载")
             

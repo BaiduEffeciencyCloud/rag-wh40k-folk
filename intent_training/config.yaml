@@ -80,17 +80,68 @@ advanced_feature:
   # pa_feature.py 专用权重配置
   pa_feature_weights:
     char_weight: 1.0      # 字符特征权重降低
-    semantic_weight: 1.2  # 语义特征权重降低
-    statistical_weight: 2.0  # 统计特征权重提高
-    complexity_weight: 1.0  # 复杂度特征权重
-    sentence_weight: 0.3  # 句向量权重
+    semantic_weight: 1.5  # 语义特征权重降低
+    statistical_weight: 1.8  # 统计特征权重提高
+    complexity_weight: 1.5  # 复杂度特征权重
+    sentence_weight: 0.5  # 句向量权重
   
   # ad_feature.py 专用权重配置
   ad_feature_weights:
-    char_weight: 1.0      # 字符特征权重
-    semantic_weight: 2.0  # 语义特征权重
-    statistical_weight: 1.0  # 统计特征权重
+    char_weight: 1.2      # 字符特征权重
+    semantic_weight: 1.8  # 语义特征权重
+    statistical_weight: 1.5  # 统计特征权重
     sentence_weight: 0.5  # 句向量权重
+  
+  # 恶意词和辅助词特征配置
+  evilgood_feature:
+    # 恶意词权重：检测到恶意词时，将pa_feature_weights中所有权重(char_weight、semantic_weight、statistical_weight、complexity_weight、sentence_weight)全部乘以此值，目的是恶意查询的所有特征权重大幅降低，导致置信度低于阈值，被分类为"NON-WH40K"
+    malicious_weight: 0.0001
+    # 辅助词权重：检测到辅助词时，将semantic_weight乘以此值，降低语义特征权重，突出其他特征，目的是减少辅助词对最终分类的干扰，突出核心意图特征
+    helper_weight: 0.9
+    # 恶意词模式列表
+    malicious_patterns:
+      - "我不想知道"
+      - "不要告诉我"
+      - "别说出来"
+      - "不想知道"
+      - "别说了"
+      - "闭嘴"
+      - "不要回答"
+      - "别回答"
+      - "我不想听"
+      - "不要解释"
+      - "别解释"
+      - "不想了解"
+      - "不要说明"
+      - "别说明"
+      - "不想查询"
+      - "不要查询"
+      - "不想听你解释"
+      - "别跟我说"
+      - "不说"
+      - "别告诉我"
+      - "别说"
+      - "别跟我说"
+      - "没兴趣了解"
+      - "不要给我解释"
+    # 辅助词模式列表
+    helper_patterns:
+      - "我想知道"
+      - "告诉我"
+      - "回答我"
+      - "请回答"
+      - "帮我查一下"
+      - "能否说明"
+      - "请解释"
+      - "帮我看看"
+      - "能否告诉我"
+      - "请告诉我"
+      - "帮我查询"
+      - "能否查询"
+      - "我有个问题"
+      - "我有个疑问"
+      - "我有个困惑"
+      - "我有个不解"
   
   # 意图关键词配置
   intent_keywords:
@@ -117,11 +168,25 @@ advanced_feature:
       - "列举"
       - "哪些"
       - "多少种"
-      - "什么类型"
-      - "什么种类"
-      - "什么单位"
-      - "什么武器"
-      - "什么技能"
+      - "各是多少"
+      - "都有哪些"
+      - "都是什么"
+      - "都是多少"
+      - "多少个"
+      - "有哪些"
+      - "都是谁"
+      - "都有谁"
+      - "哪些种"
+      - "哪个类"
+      - "各是多少"
+      - "都有哪些"
+      - "都有什么"
+      - "都有多少"
+      - "都...哪些"
+      - "哪些...可以"
+      - "哪些...能够"
+      - "哪些...拥有"
+      - "哪些...具备"
     query:
       - "什么是"
       - "如何"
@@ -139,6 +204,10 @@ advanced_feature:
       - "帮我查一下"
       - "请解释"
       - "能否说明"
+      - "什么类型"
+      - "什么关键字"
+      - "什么技能"
+      - "什么样的"
     rule:
       - "什么情况下"
       - "如何触发"
@@ -155,6 +224,8 @@ advanced_feature:
       - "如果...那么"
       - "当...的时候"
       - "在...的情况下"
+      - "在...前"
+      - "什么变化"
       - "需要满足"
       - "必须满足"
 

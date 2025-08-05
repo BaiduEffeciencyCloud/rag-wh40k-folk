@@ -40,14 +40,39 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         # 初始化复杂度计算器
         self.complexity_calculator = ComplexityCalculator(config)
         
+        # 从配置文件读取evilgood_feature配置
+        self._init_evilgood_feature_from_config()
+        
     def _init_primary_keywords(self) -> Dict[str, List[str]]:
-        """初始化主要关键词"""
-        return {
-            'Query': ['什么', '如何', '为什么', '哪个', '怎么', '解释', '说明', '定义', '是什么', '什么意思','怎么规定','怎么定义','几个意思'],
-            'List': ['哪些', '多少个', '列举', '多少种', '什么类型', '什么种类', '什么单位', '什么武器', '什么技能', '有哪些', '全部', '所有',"哪些单位","哪些武器","哪些技能","哪些关键词","哪些关键字","哪些分队"],
-            'Compare': ['哪个', '相比', '比较', '更', '最高', '最低', '最远', '最近', '最长', '最短', '哪个更高', '哪个更低', '哪个更好', '哪个更差'],
-            'Rule': ['规则', '条件', '要求', '限制', '必须', '应该', '需要', '如果', '当', '在什么情况下']
-        }
+        """初始化主要关键词 - 从config.yaml读取intent_keywords"""
+        try:
+            # 从config.yaml读取intent_keywords
+            intent_keywords = self.config.get('advanced_feature', {}).get('intent_keywords', {})
+            
+            # 验证配置是否存在
+            if not intent_keywords:
+                raise ValueError("配置中缺少intent_keywords")
+            
+            # 验证配置格式是否正确
+            if not isinstance(intent_keywords, dict):
+                raise ValueError("intent_keywords必须是字典格式")
+            
+            # 验证必需的意图键是否存在
+            required_intents = ['query', 'list', 'compare', 'rule']
+            for intent in required_intents:
+                if intent not in intent_keywords:
+                    raise ValueError(f"配置中缺少必需的意图键: {intent}")
+                if not isinstance(intent_keywords[intent], list):
+                    raise ValueError(f"意图键 {intent} 的值必须是列表格式")
+                if len(intent_keywords[intent]) == 0:
+                    raise ValueError(f"意图键 {intent} 的关键词列表不能为空")
+            
+            logger.info(f"成功从config.yaml读取intent_keywords: {list(intent_keywords.keys())}")
+            return intent_keywords
+            
+        except Exception as e:
+            logger.error(f"读取intent_keywords失败: {e}")
+            raise
         
     def _init_secondary_keywords(self) -> Dict[str, List[str]]:
         """初始化次要关键词（移除辅助词汇）"""
@@ -99,33 +124,12 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         return any(pattern in text for pattern in helper_patterns)
         
     def _get_malicious_weight(self, text: str) -> float:
-        """计算恶意词汇权重"""
-        malicious_patterns = getattr(self, 'malicious_patterns', None)
-        if malicious_patterns is None:
-            malicious_patterns = self._init_malicious_patterns()
-        weight = 0.0
-        for pattern in malicious_patterns:
-            if pattern in text:
-                weight += 1.0
-        return weight
+        """计算恶意词汇权重（兼容旧版本）"""
+        return self._get_malicious_adjustment_coefficient(text)
         
     def _get_helper_context_weight(self, text: str, keyword: str, pos: int) -> float:
-        """计算辅助词汇上下文权重"""
-        helper_patterns = getattr(self, 'helper_patterns', None)
-        if helper_patterns is None:
-            helper_patterns = self._init_helper_patterns()
-        
-        # 检查关键词前后的上下文
-        before = text[max(0, pos-8):pos]
-        after = text[pos+len(keyword):pos+len(keyword)+8]
-        
-        # 如果被辅助词汇包围，降低权重
-        is_helper_context = any(pattern in before for pattern in helper_patterns)
-        
-        if is_helper_context:
-            return 0.3  # 大幅降低权重
-        else:
-            return 1.0  # 正常权重
+        """计算辅助词汇上下文权重（兼容旧版本）"""
+        return self._get_helper_adjustment_coefficient(text, keyword, pos)
         
     def position_weighted_matching(self, query: str, keywords: List[str]) -> float:
         """位置权重匹配"""
@@ -188,52 +192,52 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         """提取结构特征"""
         features = []
         
-        # 恶意词汇检测 - 将恶意权重作为现有特征的一部分
-        malicious_weight = self._get_malicious_weight(text)
+        # 恶意词汇检测 - 使用配置驱动的调整系数
+        malicious_coefficient = self._get_malicious_adjustment_coefficient(text)
         
         # 疑问词特征
         question_words = ['什么', '如何', '为什么', '哪个', '怎么', '哪些']
         question_count = sum(1 for word in question_words if word in text)
         # 如果恶意词汇存在，降低疑问词权重
-        if malicious_weight > 0:
-            question_count *= 0.1
+        if malicious_coefficient < 1.0:
+            question_count *= malicious_coefficient
         features.append(question_count)
         
         # 数量词特征
         quantity_words = ['哪些', '多少个', '多少种', '几个', '多少']
         quantity_count = sum(1 for word in quantity_words if word in text)
         # 如果恶意词汇存在，降低数量词权重
-        if malicious_weight > 0:
-            quantity_count *= 0.1
+        if malicious_coefficient < 1.0:
+            quantity_count *= malicious_coefficient
         features.append(quantity_count)
         
         # 比较词特征
         comparison_words = ['哪个', '相比', '比较', '更', '最高', '最低', '最远', '最近']
         comparison_count = sum(1 for word in comparison_words if word in text)
         # 如果恶意词汇存在，降低比较词权重
-        if malicious_weight > 0:
-            comparison_count *= 0.1
+        if malicious_coefficient < 1.0:
+            comparison_count *= malicious_coefficient
         features.append(comparison_count)
         
         # 句子长度特征
         sentence_length = len(text)
         # 如果恶意词汇存在，降低句子长度权重
-        if malicious_weight > 0:
-            sentence_length *= 0.1
+        if malicious_coefficient < 1.0:
+            sentence_length *= malicious_coefficient
         features.append(sentence_length)
         
         # 词数特征
         word_count = len(list(jieba.cut(text)))
         # 如果恶意词汇存在，降低词数权重
-        if malicious_weight > 0:
-            word_count *= 0.1
+        if malicious_coefficient < 1.0:
+            word_count *= malicious_coefficient
         features.append(word_count)
         
         # 标点符号特征
         punctuation_count = sum(1 for char in text if char in '，。！？；：""''（）【】')
         # 如果恶意词汇存在，降低标点符号权重
-        if malicious_weight > 0:
-            punctuation_count *= 0.1
+        if malicious_coefficient < 1.0:
+            punctuation_count *= malicious_coefficient
         features.append(punctuation_count)
         
         return np.array(features)
@@ -282,24 +286,25 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
                 
                 # 调用批量句向量融合方法 - 传递复杂度特征
                 return self._sentence_embedding_fusion(
-                    char_features, semantic_features, statistical_features, sentence_embeddings, complexity_features
+                    char_features, semantic_features, statistical_features, sentence_embeddings, complexity_features, original_texts
                 )
             except Exception as e:
                 logger.warning(f"批量句向量融合失败，回退到原有逻辑: {e}")
                 # 回退到原有逻辑 - 传递复杂度特征
                 return self._original_hierarchical_fusion(
-                    char_features, semantic_features, statistical_features, complexity_features
+                    char_features, semantic_features, statistical_features, complexity_features, original_texts
                 )
         else:
             # 原有融合路径 - 保持现有逻辑不变
             return self._original_hierarchical_fusion(
-                char_features, semantic_features, statistical_features, complexity_features
+                char_features, semantic_features, statistical_features, complexity_features, original_texts
             )
     
     def _original_hierarchical_fusion(self, char_features: np.ndarray, 
                                      semantic_features: np.ndarray, 
                                      statistical_features: np.ndarray,
-                                     complexity_features: np.ndarray = None) -> np.ndarray:
+                                     complexity_features: np.ndarray = None,
+                                     original_texts: List[str] = None) -> np.ndarray:
         """原有的分层融合逻辑"""
         # 获取pa_feature_weights配置
         pa_weights = self.config.get('advanced_feature', {}).get('pa_feature_weights', {})
@@ -308,13 +313,21 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         statistical_weight = pa_weights.get('statistical_weight', 1.0)
         complexity_weight = pa_weights.get('complexity_weight', 1.0)
         
-        # 记录权重应用
-        logger.info(f"应用pa_feature权重: char={char_weight}, semantic={semantic_weight}, statistical={statistical_weight}, complexity={complexity_weight}")
+        # 应用恶意词权重（如果提供了原始文本）
+        malicious_coefficient = 1.0
+        if original_texts and len(original_texts) > 0:
+            # 使用第一个文本作为代表（批量处理时通常所有文本都是同一类型）
+            malicious_coefficient = self._get_malicious_adjustment_coefficient(original_texts[0])
+            if malicious_coefficient < 1.0:
+                logger.info(f"检测到恶意词，应用恶意词权重: {malicious_coefficient}")
         
-        # 应用权重
-        weighted_char_features = char_features * char_weight
-        weighted_semantic_features = semantic_features * semantic_weight
-        weighted_statistical_features = statistical_features * statistical_weight
+        # 记录权重应用
+        logger.info(f"应用pa_feature权重: char={char_weight}, semantic={semantic_weight}, statistical={statistical_weight}, complexity={complexity_weight}, malicious={malicious_coefficient}")
+        
+        # 应用权重（包括恶意词权重）
+        weighted_char_features = char_features * char_weight * malicious_coefficient
+        weighted_semantic_features = semantic_features * semantic_weight * malicious_coefficient
+        weighted_statistical_features = statistical_features * statistical_weight * malicious_coefficient
         
         # 第一层：语义特征与统计特征融合
         semantic_statistical = np.concatenate([weighted_semantic_features, weighted_statistical_features], axis=1)
@@ -324,7 +337,7 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         
         # 第三层：与句子复杂度特征融合（如果启用）
         if complexity_features is not None and complexity_features.shape[1] > 0:
-            weighted_complexity_features = complexity_features * complexity_weight
+            weighted_complexity_features = complexity_features * complexity_weight * malicious_coefficient
             final_features = np.concatenate([final_features, weighted_complexity_features], axis=1)
         
         return final_features
@@ -349,6 +362,8 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
             for intent, keywords in self.negative_keywords.items():
                 negative_score = self.fuzzy_keyword_matching(text, keywords)
                 text_features.append(negative_score)
+            
+
             
             features.append(text_features)
         
@@ -420,7 +435,7 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         # 提取句子复杂度特征
         complexity_features = self._extract_complexity_features(texts)
         
-        # 特征融合 - 只在启用句向量时传递原始文本
+        # 特征融合 - 总是传递原始文本以确保恶意词权重能够应用
         enhanced_config = self.config.get('advanced_feature', {}).get('enhanced', {})
         use_sentence_embedding = enhanced_config.get('use_sentence_embedding', False)
         
@@ -430,8 +445,10 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
                 original_texts=texts
             )
         else:
+            # 即使没有启用句向量，也要传递original_texts以确保恶意词权重能够应用
             fused_features = self.hierarchical_fusion(
-                char_features, semantic_features, statistical_features, complexity_features
+                char_features, semantic_features, statistical_features, complexity_features,
+                original_texts=texts
             )
         
         return fused_features
@@ -524,7 +541,8 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
                                   semantic_features: np.ndarray,
                                   statistical_features: np.ndarray,
                                   sentence_embeddings: np.ndarray,
-                                  complexity_features: np.ndarray = None) -> np.ndarray:
+                                  complexity_features: np.ndarray = None,
+                                  original_texts: List[str] = None) -> np.ndarray:
         """批量句向量融合方法"""
         try:
             logger.info(f"开始批量句向量融合，特征维度: char={char_features.shape}, semantic={semantic_features.shape}, statistical={statistical_features.shape}, complexity={complexity_features.shape if complexity_features is not None else 'None'}")
@@ -536,9 +554,9 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
             
             logger.info(f"pa_feature句向量融合权重: sentence_weight={sentence_weight}")
             
-            # 原有特征融合 - 传递句子复杂度特征（这里已经应用了pa_feature_weights）
+            # 原有特征融合 - 传递original_texts以确保恶意词权重能够应用
             original_features = self._original_hierarchical_fusion(
-                char_features, semantic_features, statistical_features, complexity_features
+                char_features, semantic_features, statistical_features, complexity_features, original_texts
             )
             logger.info(f"原有特征融合完成，维度: {original_features.shape}")
             
@@ -554,9 +572,9 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
             return combined_features
         except Exception as e:
             logger.error(f"批量句向量融合失败: {e}")
-            # 回退到原有融合 - 传递句子复杂度特征
+            # 回退到原有融合 - 传递original_texts以确保恶意词权重能够应用
             return self._original_hierarchical_fusion(
-                char_features, semantic_features, statistical_features, complexity_features
+                char_features, semantic_features, statistical_features, complexity_features, original_texts
             )
         
     def save(self, filepath: str):
@@ -668,6 +686,63 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         test_query = ["测试查询"]
         features = self.transform(test_query)
         return features.shape[1]
+
+
+    def _init_evilgood_feature_from_config(self):
+        """从配置文件读取evilgood_feature配置"""
+        try:
+            evilgood_config = self.config.get('advanced_feature', {}).get('evilgood_feature', {})
+            
+            # 读取调整系数
+            self.malicious_adjustment_coefficient = evilgood_config.get('malicious_weight', 0.1)
+            self.helper_adjustment_coefficient = evilgood_config.get('helper_weight', 0.3)
+            
+            # 读取模式列表
+            self.malicious_patterns = evilgood_config.get('malicious_patterns', self._init_malicious_patterns())
+            self.helper_patterns = evilgood_config.get('helper_patterns', self._init_helper_patterns())
+            
+            logger.info(f"成功读取evilgood_feature配置: malicious_weight={self.malicious_adjustment_coefficient}, helper_weight={self.helper_adjustment_coefficient}")
+            logger.info(f"恶意词模式数量: {len(self.malicious_patterns)}, 辅助词模式数量: {len(self.helper_patterns)}")
+            
+        except Exception as e:
+            logger.warning(f"读取evilgood_feature配置失败，使用默认值: {e}")
+            # 使用默认值
+            self.malicious_adjustment_coefficient = 0.1
+            self.helper_adjustment_coefficient = 0.3
+            self.malicious_patterns = self._init_malicious_patterns()
+            self.helper_patterns = self._init_helper_patterns()
+        
+    def _get_malicious_adjustment_coefficient(self, text: str) -> float:
+        """从配置文件获取恶意词调整系数"""
+        # 确保属性已初始化
+        if not hasattr(self, 'malicious_adjustment_coefficient'):
+            self._init_evilgood_feature_from_config()
+        
+        if hasattr(self, 'malicious_patterns') and self.malicious_patterns:
+            for pattern in self.malicious_patterns:
+                if pattern in text:
+                    logger.info(f"检测到恶意词模式: {pattern}, 应用权重: {self.malicious_adjustment_coefficient}")
+                    return self.malicious_adjustment_coefficient
+        return 1.0
+        
+    def _get_helper_adjustment_coefficient(self, text: str, keyword: str, pos: int) -> float:
+        """从配置文件获取辅助词调整系数"""
+        # 确保属性已初始化
+        if not hasattr(self, 'helper_adjustment_coefficient'):
+            self._init_evilgood_feature_from_config()
+        
+        if hasattr(self, 'helper_patterns') and self.helper_patterns:
+            # 检查关键词前后的上下文
+            before = text[max(0, pos-8):pos]
+            after = text[pos+len(keyword):pos+len(keyword)+8]
+            
+            # 如果被辅助词汇包围，降低权重
+            is_helper_context = any(pattern in before for pattern in self.helper_patterns)
+            
+            if is_helper_context:
+                logger.info(f"检测到辅助词上下文，应用权重: {self.helper_adjustment_coefficient}")
+                return self.helper_adjustment_coefficient
+        return 1.0
 
 
 

@@ -696,3 +696,64 @@ S	B-ATTR
 的	O
 距离	O
 ?	O
+
+别	O
+告诉	O
+我	O
+,	O
+太空死灵	B-FACTION
+有	B-HAVE
+哪些	B-HOWMANY
+分队	B-TERM
+
+不要	O
+给	O
+我	O
+解释	O
+什么	B-WHAT
+是	B-BOOL
+先攻	B-SKILL
+技能	B-SKILL_TYPE
+
+我	O
+不想	O
+知道	O
+当	B-WHEN
+独角	B-UNIT
+发动	B-ACTION
+一次性	B-SKILL
+能力	I-SKILL
+之后	B-CONDITION
+,	O
+M	B-ATTR
+值	I-ATTR
+会	O
+变成	O
+多少	B-NUMBER
+
+在	O
+黑暗天使	B-FACTION
+的	O
+codex	O
+里	O
+,	O
+死翼骑士	B-UNIT
+的	O
+武器	B-WEAPON
+S	B-ATTR
+值	I-ATTR
+都是	O
+多少	O
+?	O
+
+在	O
+千子军团	B-FACTION
+里	O
+,	O
+哪些	B-HOWMANY
+单位	B-UNIT
+可以	B-BOOL
+使用	B-ACTION
+手雷	B-SKILL
+技能	B-SKILL_TYPE
+?	O

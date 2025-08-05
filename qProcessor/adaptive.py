@@ -627,3 +627,5 @@ class AdaptiveProcessor(QueryProcessorInterface):
         except Exception as e:
             print(f"加载WH40K词汇失败: {e}")
             return {} 
+
+ 

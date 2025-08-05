@@ -310,7 +310,19 @@ class AdaptiveProcessor(QueryProcessorInterface):
         import joblib
         import os
         
-        # 从训练输出目录加载TF-IDF向量化器
+        # 优先从models目录加载TF-IDF向量化器
+        models_dir = "models"
+        tfidf_path = os.path.join(models_dir, 'intent_tfidf.pkl')
+        
+        if os.path.exists(tfidf_path):
+            try:
+                tfidf_vectorizer = joblib.load(tfidf_path)
+                logger.info(f"成功加载TF-IDF向量化器: {tfidf_path}")
+                return tfidf_vectorizer
+            except Exception as e:
+                logger.warning(f"加载TF-IDF向量化器失败: {e}")
+        
+        # 备用方案：从训练输出目录加载
         intent_training_dir = "intent_training/model_output"
         if os.path.exists(intent_training_dir):
             # 获取最新的训练输出目录

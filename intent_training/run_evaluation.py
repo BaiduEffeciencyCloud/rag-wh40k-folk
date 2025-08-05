@@ -313,6 +313,7 @@ def handle_model_export(config, evaluator, version_path):
             print(f"意图分类器准确率: {intent_accuracy:.4f} 超过阈值 {threshold}，准备导出")
             export_model('intent_classifier', version_path, export_dir, override, config)
             export_feature_extractor(version_path, export_dir, override, config)
+            export_config_file(version_path, export_dir, override, config)
         else:
             print(f"意图分类器准确率: {intent_accuracy:.4f} 未达到阈值 {threshold}")
     
@@ -388,6 +389,35 @@ def export_feature_extractor(version_path, export_dir, override, config):
     
     shutil.copy2(source_path, target_path)
     print(f"特征提取器导出成功: {source_path} -> {target_path}")
+
+
+def export_config_file(version_path, export_dir, override, config):
+    """
+    导出配置文件到指定目录
+    
+    Args:
+        version_path: 模型版本路径
+        export_dir: 导出目录
+        override: 是否覆盖
+        config: 配置字典
+    """
+    source_path = os.path.join(version_path, "config", "config.yaml")
+    target_path = os.path.join(export_dir, "config.yaml")
+    
+    if not os.path.exists(source_path):
+        print(f"配置文件不存在: {source_path}")
+        return
+    
+    if os.path.exists(target_path) and not override:
+        print(f"配置文件已存在且不允许覆盖: {target_path}")
+        return
+    
+    if os.path.exists(target_path) and override:
+        os.remove(target_path)
+        print(f"删除已存在的配置文件: {target_path}")
+    
+    shutil.copy2(source_path, target_path)
+    print(f"配置文件导出成功: {source_path} -> {target_path}")
 
 
 def main():

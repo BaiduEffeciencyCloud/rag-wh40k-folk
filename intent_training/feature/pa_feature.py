@@ -43,8 +43,8 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
     def _init_primary_keywords(self) -> Dict[str, List[str]]:
         """初始化主要关键词"""
         return {
-            'Query': ['什么', '如何', '为什么', '哪个', '怎么', '解释', '说明', '定义', '是什么', '什么意思'],
-            'List': ['哪些', '多少个', '列举', '多少种', '什么类型', '什么种类', '什么单位', '什么武器', '什么技能', '有哪些', '全部', '所有'],
+            'Query': ['什么', '如何', '为什么', '哪个', '怎么', '解释', '说明', '定义', '是什么', '什么意思','怎么规定','怎么定义','几个意思'],
+            'List': ['哪些', '多少个', '列举', '多少种', '什么类型', '什么种类', '什么单位', '什么武器', '什么技能', '有哪些', '全部', '所有',"哪些单位","哪些武器","哪些技能","哪些关键词","哪些关键字","哪些分队"],
             'Compare': ['哪个', '相比', '比较', '更', '最高', '最低', '最远', '最近', '最长', '最短', '哪个更高', '哪个更低', '哪个更好', '哪个更差'],
             'Rule': ['规则', '条件', '要求', '限制', '必须', '应该', '需要', '如果', '当', '在什么情况下']
         }
@@ -52,7 +52,7 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
     def _init_secondary_keywords(self) -> Dict[str, List[str]]:
         """初始化次要关键词"""
         return {
-            'Query': ['查询', '了解', '知道', '告诉我', '我想知道', '帮我查一下', '请解释', '能否说明'],
+            'Query': ['查询', '了解', '知道'],
             'List': ['查看', '浏览', '展示', '显示', '列出', '提供', '给出'],
             'Compare': ['对比', '差异', '区别', '不同', '相似', '相同'],
             'Rule': ['规定', '约束', '限制', '允许', '禁止', '可以', '不能']
@@ -97,7 +97,7 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
                 context_weight = 1.0
                 if any(word in before for word in ['哪个', '什么', '如何', '为什么']):
                     context_weight *= 1.3  # 疑问词增强权重
-                if any(word in after for word in ['的', '值', '属性', '能力', '技能']):
+                if any(word in after for word in ['的', '值', '属性', '能力', '技能','武器','关键字','技能']):
                     context_weight *= 1.2  # 属性词增强权重
                 matches.append(context_weight)
         return sum(matches) if matches else 0.0

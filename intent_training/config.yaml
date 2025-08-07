@@ -19,7 +19,7 @@ max_sentence_length: 100 # 槽位句子最大长度
 feature_type: pa  # 特征提取器类型：basic=基础特征，advanced=高级特征，pa=Position-Aware特征
 intent_feature:
   max_features: 1000  # TF-IDF最大特征数
-  ngram_range: [1, 2] # ngram范围，(1,2)表示1-2gram
+  ngram_range: [1, 3] # ngram范围，(1,2)表示1-2gram
   min_df: 1           # 最小文档频率，过滤低频特征
   analyzer: char      # 分析粒度，char=字符级，word=词级
   intent_tfidf: intent_tfidf.pkl  # TF-IDF特征提取器文件名
@@ -45,7 +45,7 @@ advanced_feature:
   
   # TF-IDF特征配置（字符级特征）
   tfidf:
-    max_features: 1500  # 最大特征数（增加）
+    max_features: 2000  # 最大特征数（增加）
     ngram_range: [1, 3] # ngram范围（增加三元组）
     min_df: 1           # 最小文档频率
     analyzer: char       # 分析粒度
@@ -187,6 +187,9 @@ advanced_feature:
       - "哪些...能够"
       - "哪些...拥有"
       - "哪些...具备"
+      - "哪些..具备"
+      - "哪些..有"
+      - "哪些..是"
     query:
       - "什么是"
       - "如何"
@@ -269,10 +272,10 @@ classifier:
     
   # 类别权重（用于处理不平衡数据）
   class_weights:
-    Query: 2.0    # 提升Query权重（当前准确率低）
-    List: 1.0     # 保持List权重（当前准确率高）
-    Compare: 1.5  # 适度提升Compare权重
-    Rule: 1.2     # 适度提升Rule权重
+    Query: 1.0    # 提升Query权重（当前准确率低）
+    List: 1.5     # 保持List权重（当前准确率高）
+    Compare: 1.6  # 适度提升Compare权重
+    Rule: 2.0     # 适度提升Rule权重
 
 slot_buffer_max_size: 1000  # 槽位缓存最大长度
 slot_classifier_type: logistic # 槽位分类器类型

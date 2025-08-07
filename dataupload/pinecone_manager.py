@@ -62,9 +62,9 @@ class PineconeManager:
         results = []
         try:
             # 这里的vector内容无关紧要，只要用filter即可，长度需与index一致
-            # 这里假设1536维，如有不同请根据实际模型调整
+            # 这里假设1024维，如有不同请根据实际模型调整
             query_result = self.index.query(
-                vector=[0.0]*1536,
+                vector=[0.0]*1024,
                 filter=filter_dict,
                 top_k=limit,
                 include_metadata=True

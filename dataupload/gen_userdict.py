@@ -12,7 +12,7 @@ import jieba
 import math
 import string
 import ahocorasick
-import config as global_config
+import dataupload.config as global_config
 from dataupload.phrase_weight import PhraseWeightScorer, AutoThresholdPhraseWeightScorer
 
 # 加载.env配置
@@ -522,7 +522,12 @@ def generate_userdict_and_vocab(input_dir, output_dir, min_freq=5, min_pmi=3.0, 
     }
     
     # 生成保护性词典
-    generate_whitelist(phrases, dict_path, unigram_counter=None, do_filter=True, config=config_dict)
+    if global_config.ENABLE_WH40K_WHITELIST:
+        # 使用混合白名单生成
+        generate_hybrid_whitelist(texts, dict_path, global_config.WH40K_VOCAB_PATH)
+    else:
+        # 使用原来的逻辑
+        generate_whitelist(phrases, dict_path, unigram_counter=None, do_filter=True, config=config_dict)
     
     # 创建并训练BM25Manager
     bm25 = BM25Manager(user_dict_path=dict_path)

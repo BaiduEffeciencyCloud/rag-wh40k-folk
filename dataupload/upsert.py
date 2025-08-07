@@ -117,7 +117,7 @@ class UpsertManager:
             logging.info("✅ BM25Manager 初始化完成")
         
         # 获取最新的BM25词汇表文件路径
-        vocab_path = self._get_latest_vocab_path()
+        vocab_path = self.bm25_manager.get_latest_freq_dict_file()
         
         # 使用BM25Config生成模型路径
         model_path = self.bm25_config.get_model_path()
@@ -279,6 +279,12 @@ class UpsertManager:
                             'status': 'pending',
                             'metadata': vector_data['metadata']
                         })
+                        
+                        # 记录稀疏向量生成情况
+                        if 'sparse_values' in vector_data:
+                            logging.info(f"[SPARSE_STATS] {chunk_id} - 稀疏向量生成成功")
+                        else:
+                            logging.warning(f"[SPARSE_STATS] {chunk_id} - 稀疏向量生成失败或为空")
                     except Exception as e:
                         logging.error(f"[ERROR] Chunk {i} embedding/upload failed: {e}")
                         upload_records.append({
@@ -347,11 +353,23 @@ class UpsertManager:
                 with open(upload_log_file, 'w', encoding='utf-8') as f:
                     json.dump(upload_summary, f, ensure_ascii=False, indent=2)
                 
+                # 统计稀疏向量生成情况
+                sparse_vectors_count = sum(1 for vector in vectors_to_upsert if 'sparse_values' in vector)
+                dense_only_count = len(vectors_to_upsert) - sparse_vectors_count
+                
                 logging.info(f"✅ Pinecone 向量上传完成:")
                 logging.info(f"  - 总切片数: {len(chunks)}")
                 logging.info(f"  - 成功上传: {successful_uploads}")
                 logging.info(f"  - 上传失败: {failed_uploads}")
+                logging.info(f"  - 包含稀疏向量: {sparse_vectors_count}")
+                logging.info(f"  - 仅稠密向量: {dense_only_count}")
                 logging.info(f"  - 上传记录已保存到: {upload_log_file}")
+                
+                # 如果稀疏向量生成率过低，给出警告
+                if sparse_vectors_count == 0:
+                    logging.error(f"❌ 警告: 所有 {len(vectors_to_upsert)} 个向量都没有生成稀疏向量！")
+                elif sparse_vectors_count < len(vectors_to_upsert) * 0.5:
+                    logging.warning(f"⚠️ 稀疏向量生成率较低: {sparse_vectors_count}/{len(vectors_to_upsert)} ({sparse_vectors_count/len(vectors_to_upsert)*100:.1f}%)")
                 
                 # 检查特定切片是否上传成功
                 if failed_uploads > 0:

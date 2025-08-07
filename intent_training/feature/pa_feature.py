@@ -125,7 +125,10 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         
     def _get_malicious_weight(self, text: str) -> float:
         """计算恶意词汇权重（兼容旧版本）"""
-        return self._get_malicious_adjustment_coefficient(text)
+        coefficient = self._get_malicious_adjustment_coefficient(text)
+        # 如果系数是1.0，说明没有恶意词汇，返回0.0
+        # 如果系数不是1.0，说明有恶意词汇，返回系数值
+        return 0.0 if coefficient == 1.0 else coefficient
         
     def _get_helper_context_weight(self, text: str, keyword: str, pos: int) -> float:
         """计算辅助词汇上下文权重（兼容旧版本）"""
@@ -187,6 +190,46 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
             if max_similarity > 0.8:  # 相似度阈值
                 matches.append(max_similarity)
         return sum(matches) if matches else 0.0
+        
+    def _match_cross_char_pattern(self, query: str, pattern: str) -> float:
+        """匹配跨字符模式，如"都...哪些"、"当...时"等"""
+        if "..." not in pattern:
+            return 0.0
+        
+        # 分割模式
+        parts = pattern.split("...")
+        if len(parts) != 2:
+            return 0.0
+        
+        start_part, end_part = parts
+        
+        # 查找开始部分
+        start_idx = query.find(start_part)
+        if start_idx == -1:
+            return 0.0
+        
+        # 查找结束部分（在开始部分之后）
+        end_idx = query.find(end_part, start_idx + len(start_part))
+        if end_idx == -1:
+            return 0.0
+        
+        # 计算匹配度
+        total_length = len(start_part) + len(end_part)
+        pattern_length = len(pattern)
+        match_ratio = total_length / pattern_length
+        
+        # 确保匹配度在合理范围内
+        return min(match_ratio, 1.0)
+
+    def cross_char_pattern_matching(self, query: str, keywords: List[str]) -> float:
+        """跨字符模式匹配 - 选择最高匹配度"""
+        max_similarity = 0.0
+        for keyword in keywords:
+            if "..." in keyword:
+                similarity = self._match_cross_char_pattern(query, keyword)
+                max_similarity = max(max_similarity, similarity)
+        
+        return max_similarity
         
     def extract_structural_features(self, text: str) -> np.ndarray:
         """提取结构特征"""
@@ -363,7 +406,10 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
                 negative_score = self.fuzzy_keyword_matching(text, keywords)
                 text_features.append(negative_score)
             
-
+            # 跨字符模式匹配
+            for intent, keywords in self.primary_keywords.items():
+                cross_char_score = self.cross_char_pattern_matching(text, keywords)
+                text_features.append(cross_char_score)
             
             features.append(text_features)
         

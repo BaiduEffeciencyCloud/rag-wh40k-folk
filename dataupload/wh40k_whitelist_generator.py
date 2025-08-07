@@ -59,5 +59,13 @@ class WH40KWhitelistGenerator:
                 clean_term = term.strip()
                 if clean_term:  # 确保trim后不为空
                     terms.append(clean_term)
+                    
+                    # 也添加同义词
+                    if isinstance(term_info, dict) and 'synonyms' in term_info:
+                        synonyms = term_info['synonyms']
+                        if isinstance(synonyms, list):
+                            for synonym in synonyms:
+                                if isinstance(synonym, str) and synonym.strip():
+                                    terms.append(synonym.strip())
         
         return terms 

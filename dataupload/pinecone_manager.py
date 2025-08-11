@@ -1,6 +1,7 @@
 import os
 from typing import Dict, List, Any
 from pinecone import Pinecone
+from config import PINECONE_API_KEY, PINECONE_INDEX
 
 class PineconeManager:
     """
@@ -12,11 +13,11 @@ class PineconeManager:
     4. 统计索引总记录数
     """
     def __init__(self, index_name: str = None, api_key: str = None, environment: str = None):
-        self.index_name = index_name or os.getenv('PINECONE_INDEX')
-        self.api_key = api_key or os.getenv('PINECONE_API_KEY')
-        self.environment = environment or os.getenv('PINECONE_ENVIRONMENT', 'gcp-starter')
+        self.index_name = index_name or PINECONE_INDEX
+        self.api_key = api_key or PINECONE_API_KEY
+        self.environment = environment or 'gcp-starter'
         if not self.index_name or not self.api_key:
-            raise ValueError("PINECONE_INDEX 和 PINECONE_API_KEY 必须配置在环境变量中")
+            raise ValueError("PINECONE_INDEX 和 PINECONE_API_KEY 必须配置在config.py中")
         # 新版SDK初始化
         self.pc = Pinecone(api_key=self.api_key)
         self.index = self.pc.Index(self.index_name)
@@ -90,6 +91,100 @@ class PineconeManager:
             "h3": h3_value
         }
         return self.query_by_filter(filter_dict, limit=limit)
+
+    def check_sparse_vectors(self, limit: int = 10) -> dict:
+        """
+        检查索引中的记录是否包含sparse向量
+        :param limit: 检查的记录数量
+        :return: 包含统计信息的字典
+        """
+        try:
+            # 使用一个简单的查询来获取记录
+            query_result = self.index.query(
+                vector=[0.0]*1024,  # 假设1024维
+                top_k=limit,
+                include_metadata=True,
+                include_values=True  # 包含向量值
+            )
+            
+            total_records = len(query_result.matches)
+            sparse_count = 0
+            dense_only_count = 0
+            sample_records = []
+            
+            for match in query_result.matches:
+                record_info = {
+                    'id': match.id,
+                    'has_sparse': hasattr(match, 'sparse_values') and match.sparse_values is not None,
+                    'metadata': match.metadata
+                }
+                
+                if record_info['has_sparse']:
+                    sparse_count += 1
+                    # 记录sparse向量的详细信息
+                    sparse_values = match.sparse_values
+                    record_info['sparse_indices_count'] = len(sparse_values.get('indices', []))
+                    record_info['sparse_values_count'] = len(sparse_values.get('values', []))
+                    if record_info['sparse_indices_count'] > 0:
+                        record_info['sparse_sample'] = {
+                            'indices': sparse_values['indices'][:5],
+                            'values': sparse_values['values'][:5]
+                        }
+                else:
+                    dense_only_count += 1
+                
+                sample_records.append(record_info)
+            
+            stats = {
+                'total_checked': total_records,
+                'sparse_count': sparse_count,
+                'dense_only_count': dense_only_count,
+                'sparse_percentage': (sparse_count / total_records * 100) if total_records > 0 else 0,
+                'sample_records': sample_records
+            }
+            
+            return stats
+            
+        except Exception as e:
+            print(f"检查sparse向量时出错: {e}")
+            return {
+                'error': str(e),
+                'total_checked': 0,
+                'sparse_count': 0,
+                'dense_only_count': 0,
+                'sparse_percentage': 0,
+                'sample_records': []
+            }
+
+    def fetch_record_details(self, record_id: str) -> dict:
+        """
+        获取指定记录的详细信息
+        :param record_id: 记录ID
+        :return: 记录详细信息
+        """
+        try:
+            # 使用fetch方法获取特定记录
+            fetch_result = self.index.fetch(ids=[record_id])
+            
+            if record_id in fetch_result.vectors:
+                vector = fetch_result.vectors[record_id]
+                return {
+                    'id': record_id,
+                    'has_sparse': hasattr(vector, 'sparse_values') and vector.sparse_values is not None,
+                    'metadata': vector.metadata,
+                    'dense_vector_length': len(vector.values) if hasattr(vector, 'values') else 0,
+                    'sparse_info': {
+                        'indices_count': len(vector.sparse_values['indices']) if hasattr(vector, 'sparse_values') and vector.sparse_values else 0,
+                        'values_count': len(vector.sparse_values['values']) if hasattr(vector, 'sparse_values') and vector.sparse_values else 0,
+                        'sample_indices': vector.sparse_values['indices'][:5] if hasattr(vector, 'sparse_values') and vector.sparse_values and len(vector.sparse_values['indices']) > 0 else [],
+                        'sample_values': vector.sparse_values['values'][:5] if hasattr(vector, 'sparse_values') and vector.sparse_values and len(vector.sparse_values['values']) > 0 else []
+                    }
+                }
+            else:
+                return {'error': f'Record {record_id} not found'}
+                
+        except Exception as e:
+            return {'error': f'Fetch record failed: {e}'}
 
 if __name__ == "__main__":
     # 简单命令行测试

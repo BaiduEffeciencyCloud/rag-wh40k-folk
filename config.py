@@ -8,16 +8,35 @@ from dotenv import load_dotenv
 from pinecone import Pinecone
 from langchain_openai import OpenAIEmbeddings
 from dataupload.phrase_weight import PhraseWeightScorer
-
 # 加载.env文件中的环境变量
 load_dotenv()
 
 # 配置日志
-logging.basicConfig(
-    level=logging.INFO,  # 设置日志级别为INFO
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',  # 设置日志格式
-    handlers=[logging.StreamHandler()]  # 配置StreamHandler
-)
+def setup_logging(log_file_path=None):
+    """设置日志配置，支持文件和控制台输出"""
+    # 清除现有的handlers
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    handlers = [logging.StreamHandler()]
+    
+    if log_file_path:
+        # 确保日志目录存在
+        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
+        file_handler = logging.FileHandler(log_file_path, encoding='utf-8')
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        handlers.append(file_handler)
+    
+    logging.basicConfig(
+        level=logging.INFO,  # 设置日志级别为INFO
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',  # 设置日志格式
+        handlers=handlers,
+        force=True  # 强制重新配置
+    )
+
+# 默认只配置控制台输出
+setup_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +45,20 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     logger.warning("OPENAI_API_KEY not found in environment variables")
 
+#Connection 配置, 使用哪种数据库[opesearch, pinecone]
+CONNECTION="opensearch"
+
+# OpenSearch API配置
+OPENSERACH_URI=os.getenv("OPENSERACH_URI")
+OPENSEARCH_USERNAME=os.getenv("OPENSEARCH_USERNAME")
+OPENSEARCH_PASSWORD=os.getenv("OPENSEARCH_PASSWORD")
+OPENSERACH_INDEX="wh40k-test"
+
 # Pinecone API配置
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 if not PINECONE_API_KEY:
     logger.warning("PINECONE_API_KEY not found in environment variables")
-PINECONE_INDEX = os.getenv("PINECONE_INDEX")
+PINECONE_INDEX = "40ktest"
 
 # Neo4j 数据库配置
 NEO4J_URI = os.getenv("NEO4J_URI")
@@ -70,13 +98,19 @@ DEFAULT_MAX_WORKERS = int(os.getenv("DEFAULT_MAX_WORKERS", "4"))  # 默认最大
 # 答案生成配置
 MAX_CONTEXT_RESULTS = int(os.getenv("MAX_CONTEXT_RESULTS", "20"))  # 答案生成时使用的最大上下文结果数
 
+
+
+# OPEN AI LLM模型
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
+LLM_IMAGE_MODEL=os.getenv("LLM_IMAGE_MODEL", "gpt-4o")
 # 嵌入模型
 EMBADDING_MODEL = os.getenv("EMBADDING_MODEL", "text-embedding-3-large")
 
-# LLM模型
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
-LLM_IMAGE_MODEL=os.getenv("LLM_IMAGE_MODEL", "gpt-4o")
-
+# QWEN AI LLM 模型
+EMBEDDING_MODEL_QWEN = os.getenv("EMBEDDING_MODEL_QWEN", "text-embedding-v4")
+RERANK_MODEL_QWEN = os.getenv("RERANK_MODEL_QWEN", "text-embedding-v4")
+QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")
+QWEN_DIMENSION = 2048
 
 # Hybrid检索配置
 #当 α = 0 时，完全依赖稀疏检索（纯 BM25/TF-IDF）；
@@ -158,6 +192,25 @@ def get_embedding_model():
     except Exception as e:
         logger.warning(f"[DEBUG] embedding shape 获取失败: {e}")
     return embeddings
+
+def get_qwen_embedding_model():
+    """
+    初始化并返回QWEN嵌入模型对象。
+    使用dashscope的TextEmbedding类方法调用。
+    """
+    # 导入dashscope并设置全局API key
+    import dashscope
+    from dashscope.embeddings import TextEmbedding
+    if not QWEN_API_KEY:
+        logger.error("QWEN API key not configured.")
+        raise ValueError("QWEN API key is missing.")
+
+    dashscope.api_key = QWEN_API_KEY
+    
+    # 记录初始化信息
+    logger.info(f"QWEN embedding model '{EMBEDDING_MODEL_QWEN}' initialized with API key.")
+    
+    return TextEmbedding
 
 # 日志配置
 LOG_FORMAT = os.getenv("LOG_FORMAT", '%(asctime)s - %(levelname)s - %(message)s')

@@ -21,7 +21,7 @@
 ## 安装依赖
 
 ```bash
-pip install pinecone-client langchain openai
+pip install pinecone langchain openai
 ```
 
 ## 使用方法

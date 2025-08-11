@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import argparse
 import logging
 from typing import List, Dict, Any
@@ -18,8 +19,8 @@ from dataupload.knowledge_graph_manager import KnowledgeGraphManager
 from config import get_pinecone_index, get_embedding_model
 from storage.storage_factory import StorageFactory
 
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 导入config中的日志配置函数
+from config import setup_logging
 
 class UpsertManager:
     """
@@ -32,16 +33,18 @@ class UpsertManager:
     4. 将向量化后的数据上传到 Pinecone。
     5. 统一调度、配置和日志记录。
     """
-    def __init__(self, environment: str = "production", chunker_version: str = "v3"):
+    def __init__(self, environment: str = "production", chunker_version: str = "v3", log_file_path: str = None):
         """
         初始化入库管理器
         
         Args:
             environment: 运行环境 ("production", "test", "development")
             chunker_version: 切片器版本 ("v2", "v3")
+            log_file_path: 日志文件路径，如果为None则不保存到文件
         """
         self.environment = environment
         self.chunker_version = chunker_version
+        self.log_file_path = log_file_path
         self.chunker = None
         self.kg_manager = None
         self.pinecone_index = None
@@ -49,6 +52,10 @@ class UpsertManager:
         self.bm25_manager = None  # 新增：BM25Manager实例
         self.bm25_config = BM25Config()  # 新增：BM25Config实例
 
+        # 配置日志
+        if log_file_path:
+            setup_logging(log_file_path)
+        
         logging.info(f"🚀 UpsertManager 初始化，环境: {self.environment}, 切片器版本: {self.chunker_version}")
 
     def _initialize_services(self, enable_kg: bool, enable_pinecone: bool):
@@ -190,11 +197,11 @@ class UpsertManager:
             if 'faction' not in base_metadata:
                 filename = os.path.basename(file_path)
                 if 'aeldari' in filename.lower():
-                    base_metadata['faction'] = '阿苏焉尼'
+                    base_metadata['faction'] = 'aeldari'
                 elif 'corerule' in filename.lower():
-                    base_metadata['faction'] = '核心规则'
+                    base_metadata['faction'] = 'corerule'
                 elif 'corefaq' in filename.lower():
-                    base_metadata['faction'] = '核心FAQ'
+                    base_metadata['faction'] = 'corefaq'
             chunks = self.chunker.chunk_text(content, base_metadata)
             logging.info(f"✅ 文档切片完成，生成 {len(chunks)} 个切片。")
             
@@ -331,8 +338,6 @@ class UpsertManager:
                             record['status'] = 'fail'
                             record['error'] = f"批量上传失败: {str(e)}"
                 
-                # 保存上传记录到文件
-                import json
                 
                 upload_log_file = f"dataupload/upload_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
                 os.makedirs(os.path.dirname(upload_log_file), exist_ok=True)
@@ -340,19 +345,6 @@ class UpsertManager:
                 # 统计成功和失败的数量
                 successful_uploads = sum(1 for record in upload_records if record['status'] == 'success')
                 failed_uploads = sum(1 for record in upload_records if record['status'] == 'fail')
-                
-                upload_summary = {
-                    'file_path': file_path,
-                    'upload_time': datetime.now().isoformat(),
-                    'total_chunks': len(chunks),
-                    'successful_uploads': successful_uploads,
-                    'failed_uploads': failed_uploads,
-                    'upload_records': upload_records
-                }
-                
-                with open(upload_log_file, 'w', encoding='utf-8') as f:
-                    json.dump(upload_summary, f, ensure_ascii=False, indent=2)
-                
                 # 统计稀疏向量生成情况
                 sparse_vectors_count = sum(1 for vector in vectors_to_upsert if 'sparse_values' in vector)
                 dense_only_count = len(vectors_to_upsert) - sparse_vectors_count
@@ -400,7 +392,13 @@ def main():
     parser.add_argument("--storage", type=str, default="local", choices=["local", "cloud"], help="存储类型")
     args = parser.parse_args()
     
-    manager = UpsertManager(environment=args.env, chunker_version=args.chunker_version)
+    # 生成日志文件路径
+    input_filename = os.path.splitext(os.path.basename(args.file_path))[0]
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_filename = f"{input_filename}_{timestamp}.log"
+    log_file_path = os.path.join("dataupload", "log", log_filename)
+    
+    manager = UpsertManager(environment=args.env, chunker_version=args.chunker_version, log_file_path=log_file_path)
     # 组装extra_metadata，优先使用命令行参数
     extra_metadata = {'source_file': os.path.basename(args.file_path)}
     if args.faction:

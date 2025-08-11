@@ -60,7 +60,7 @@ PROCESSOR_CONFIGS = {
     },
     'dedup': {
         'enabled': True,
-        'similarity_threshold': 0.8,  # 去重相似度阈值
+        'similarity_threshold': 0.9,  # 去重相似度阈值
         'method': 'semantic',  # 去重方法：semantic/text_hash
         'preserve_order': True,  # 是否保持原始顺序
     }

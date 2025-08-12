@@ -16,8 +16,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dataupload.data_vector_v3 import SemanticDocumentChunker, save_chunks_to_text, save_chunks_to_json
 
 from dataupload.knowledge_graph_manager import KnowledgeGraphManager
-from config import get_pinecone_index, get_embedding_model
+from config import get_embedding_model,get_qwen_embedding_model
 from storage.storage_factory import StorageFactory
+from conn.conn_factory import ConnectionFactory
+from embedding.em_factory import EmbeddingFactory
+
 
 # 导入config中的日志配置函数
 from config import setup_logging
@@ -33,7 +36,7 @@ class UpsertManager:
     4. 将向量化后的数据上传到 Pinecone。
     5. 统一调度、配置和日志记录。
     """
-    def __init__(self, environment: str = "production", chunker_version: str = "v3", log_file_path: str = None):
+    def __init__(self,embedding_model: str = "qwen", environment: str = "production", chunker_version: str = "v3", log_file_path: str = None):
         """
         初始化入库管理器
         
@@ -48,7 +51,8 @@ class UpsertManager:
         self.chunker = None
         self.kg_manager = None
         self.pinecone_index = None
-        self.embedding_model = None
+        self.embedding_model = EmbeddingFactory.create_embedding_model(embedding_model)
+        self.db_conn = None
         self.bm25_manager = None  # 新增：BM25Manager实例
         self.bm25_config = BM25Config()  # 新增：BM25Config实例
 
@@ -58,23 +62,28 @@ class UpsertManager:
         
         logging.info(f"🚀 UpsertManager 初始化，环境: {self.environment}, 切片器版本: {self.chunker_version}")
 
-    def _initialize_services(self, enable_kg: bool, enable_pinecone: bool):
-        """延迟初始化所需服务"""
+    def _initialize_conn_and_kg(self, enable_kg: bool,db_type:str,faction:str):
+        '''
+        初始化chunker的实例,知识图谱和数据库连接
+        Args:
+            enable_kg: 是否启用知识图谱写入
+            db_type: 数据库类型
+        '''
         if self.chunker is None:
             if self.chunker_version == 'v3':
-                self.chunker = SemanticDocumentChunker()
+                self.chunker = SemanticDocumentChunker(faction_name=faction)
                 logging.info("✅ SemanticDocumentChunker (v3) 初始化完成")
             else:
                 raise ValueError(f"不支持的切片器版本: {self.chunker_version}")
-            
         if enable_kg and self.kg_manager is None:
             self.kg_manager = KnowledgeGraphManager(environment=self.environment)
             logging.info("✅ KnowledgeGraphManager 初始化完成")
+        try:
+            self.db_conn = ConnectionFactory.create_conn(connection_type=db_type)
+        except Exception as e:
+            logging.error(f"❌ 初始化数据库连接失败: {e}")
+            raise e
             
-        if enable_pinecone and self.pinecone_index is None:
-            self.pinecone_index = get_pinecone_index()
-            self.embedding_model = get_embedding_model()
-            logging.info("✅ Pinecone Index 和 Embedding Model 初始化完成")
 
     def _get_latest_userdict_path(self):
         """获取dict文件夹中最新的用户词典文件"""
@@ -166,14 +175,14 @@ class UpsertManager:
             except Exception as e:
                 logging.warning(f"⚠️ 保存BM25模型失败: {e}")
 
-    def process_and_upsert_document(self, file_path: str, enable_kg: bool = True, enable_pinecone: bool = True, extra_metadata: dict = None, storage_type: str = 'local'):
+    
+    def process_and_upsert_document(self, file_path: str, enable_kg: bool = True, extra_metadata: dict = None, storage_type: str = 'local',db_type: str = 'opensearch',faction:str = None):
         """
         处理单个文档并将其入库
         
         Args:
             file_path: 文档文件路径
             enable_kg: 是否启用知识图谱写入
-            enable_pinecone: 是否启用Pinecone向量上传
             extra_metadata: 额外的元数据（如faction），优先级最高
         """
         if not os.path.exists(file_path):
@@ -181,7 +190,7 @@ class UpsertManager:
             return
 
         logging.info(f"📄 开始处理文档: {file_path}")
-        self._initialize_services(enable_kg, enable_pinecone)
+        self._initialize_conn_and_kg(enable_kg, db_type,faction)
 
         try:
             # 1. 读取和切片文档
@@ -193,15 +202,7 @@ class UpsertManager:
             base_metadata = {'source_file': os.path.basename(file_path)}
             if extra_metadata:
                 base_metadata.update(extra_metadata)
-            # 尝试从文件名推断faction（如未指定）
-            if 'faction' not in base_metadata:
-                filename = os.path.basename(file_path)
-                if 'aeldari' in filename.lower():
-                    base_metadata['faction'] = 'aeldari'
-                elif 'corerule' in filename.lower():
-                    base_metadata['faction'] = 'corerule'
-                elif 'corefaq' in filename.lower():
-                    base_metadata['faction'] = 'corefaq'
+
             chunks = self.chunker.chunk_text(content, base_metadata)
             logging.info(f"✅ 文档切片完成，生成 {len(chunks)} 个切片。")
             
@@ -257,8 +258,8 @@ class UpsertManager:
                 
                 logging.info(f"✅ 知识图谱写入完成，共计写入 {total_entities} 个实体, {total_relationships} 个关系。")
 
-            # 3. Pinecone 向量上传
-            if enable_pinecone and self.pinecone_index and self.embedding_model:
+            # 3. 向量上传
+            if self.db_conn and self.embedding_model:
                 logging.info("Step 3: 正在进行向量化并上传到 Pinecone...")
                 
                 # 构建待上传的数据和上传记录
@@ -270,7 +271,8 @@ class UpsertManager:
                     chunk_id = f"{os.path.basename(file_path)}-{i}"
                     chunk_id_mapping[i] = chunk_id
                     try:
-                        embedding = self.embedding_model.embed_query(chunk['text'])
+                        embedding = self.embedding_model.get_embedding(chunk['text'])
+                        logging.info(f"[embedding] {chunk_id}的embedding向量生成完毕.")
                         # 用build_vector_data统一构造vector
                         vector_data = build_vector_data(
                             chunk=chunk,
@@ -279,6 +281,7 @@ class UpsertManager:
                             chunk_id=chunk_id,
                             base_metadata=base_metadata
                         )
+                        logging.info("[vector_Data] vector_data创建完毕")
                         vectors_to_upsert.append(vector_data)
                         # 先标记为pending，等批量上传完成后再更新状态
                         upload_records.append({
@@ -302,7 +305,7 @@ class UpsertManager:
 
                 # 执行批量上传
                 try:
-                    batch_results = batch_upsert_vectors(self.pinecone_index, vectors_to_upsert, batch_size=100)
+                    batch_results = batch_upsert_vectors(self.db_conn, vectors_to_upsert, batch_size=100)
                     logging.info(f"[DEBUG] batch_results: {batch_results}")
                     logging.info(f"[DEBUG] batch_results类型: {type(batch_results)}")
                     logging.info(f"[DEBUG] batch_results长度: {len(batch_results)}")
@@ -387,9 +390,10 @@ def main():
     parser.add_argument("--env", type=str, default="production", choices=["production", "test", "development"], help="运行环境")
     parser.add_argument("-cv", "--chunker-version", type=str, default="v3", choices=["v2", "v3"], help="选择使用的切片器版本 (v2/v3)")
     parser.add_argument("--no-kg", action="store_true", help="禁用知识图谱写入")
-    parser.add_argument("--no-pinecone", action="store_true", help="禁用Pinecone向量上传")
+    parser.add_argument("--db", type=str, default="opensearch", choices=["pinecone", "opensearch"], help="选择使用的数据库")
     parser.add_argument("--faction", type=str, help="指定faction（可选，优先级最高）")
     parser.add_argument("--storage", type=str, default="local", choices=["local", "cloud"], help="存储类型")
+    parser.add_argument("--embedding_model", type=str, default="qwen", choices=["qwen", "openai"], help="选择使用的嵌入模型")
     args = parser.parse_args()
     
     # 生成日志文件路径
@@ -397,8 +401,9 @@ def main():
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     log_filename = f"{input_filename}_{timestamp}.log"
     log_file_path = os.path.join("dataupload", "log", log_filename)
+
     
-    manager = UpsertManager(environment=args.env, chunker_version=args.chunker_version, log_file_path=log_file_path)
+    manager = UpsertManager(embedding_model=args.embedding_model,environment=args.env, chunker_version=args.chunker_version, log_file_path=log_file_path)
     # 组装extra_metadata，优先使用命令行参数
     extra_metadata = {'source_file': os.path.basename(args.file_path)}
     if args.faction:
@@ -406,10 +411,12 @@ def main():
     manager.process_and_upsert_document(
         file_path=args.file_path,
         enable_kg=not args.no_kg,
-        enable_pinecone=not args.no_pinecone,
         extra_metadata=extra_metadata,
-        storage_type=args.storage
-    )
+        storage_type=args.storage,
+        db_type=args.db,
+        faction=args.faction
+        )
+
 
 if __name__ == "__main__":
     main()

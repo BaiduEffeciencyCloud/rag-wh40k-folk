@@ -45,14 +45,12 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     logger.warning("OPENAI_API_KEY not found in environment variables")
 
-#Connection 配置, 使用哪种数据库[opesearch, pinecone]
-CONNECTION="opensearch"
 
 # OpenSearch API配置
-OPENSERACH_URI=os.getenv("OPENSERACH_URI")
+OPENSEARCH_URI=os.getenv("OPENSEARCH_URI")
 OPENSEARCH_USERNAME=os.getenv("OPENSEARCH_USERNAME")
 OPENSEARCH_PASSWORD=os.getenv("OPENSEARCH_PASSWORD")
-OPENSERACH_INDEX="wh40k-test"
+OPENSEARCH_INDEX="40ktest"
 
 # Pinecone API配置
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
@@ -82,7 +80,7 @@ if not all([NEO4J_TEST_URI, NEO4J_TEST_USERNAME, NEO4J_TEST_PASSWORD]):
 DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_TEMPERATURE", "0.3"))
 DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", "15"))
 
-# 超时配置
+# query超时配置
 QUERY_TIMEOUT = int(os.getenv("QUERY_TIMEOUT", "30"))  # 查询超时时间（秒）
 
 # 答案生成配置
@@ -98,6 +96,18 @@ DEFAULT_MAX_WORKERS = int(os.getenv("DEFAULT_MAX_WORKERS", "4"))  # 默认最大
 # 答案生成配置
 MAX_CONTEXT_RESULTS = int(os.getenv("MAX_CONTEXT_RESULTS", "20"))  # 答案生成时使用的最大上下文结果数
 
+# ========== 网络连接配置 ==========
+# Embedding模型专用配置
+EMBEDDING_CONNECT_TIMEOUT = int(os.getenv("EMBEDDING_CONNECT_TIMEOUT", "60"))  # Embedding连接超时
+EMBEDDING_READ_TIMEOUT = int(os.getenv("EMBEDDING_READ_TIMEOUT", "120"))      # Embedding读取超时
+EMBEDDING_MAX_RETRIES = int(os.getenv("EMBEDDING_MAX_RETRIES", "3"))         # Embedding重试次数
+EMBEDDING_RETRY_DELAY = float(os.getenv("EMBEDDING_RETRY_DELAY", "2.0"))     # Embedding重试延迟
+
+# 指数退避配置
+EMBEDDING_USE_EXPONENTIAL_BACKOFF = os.getenv("EMBEDDING_USE_EXPONENTIAL_BACKOFF", "true").lower() == "true"
+EMBEDDING_BACKOFF_FACTOR = float(os.getenv("EMBEDDING_BACKOFF_FACTOR", "2.0"))
+EMBEDDING_MAX_BACKOFF_DELAY = float(os.getenv("EMBEDDING_MAX_BACKOFF_DELAY", "30.0"))
+
 
 
 # OPEN AI LLM模型
@@ -105,6 +115,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
 LLM_IMAGE_MODEL=os.getenv("LLM_IMAGE_MODEL", "gpt-4o")
 # 嵌入模型
 EMBADDING_MODEL = os.getenv("EMBADDING_MODEL", "text-embedding-3-large")
+OPENAI_DIMENSION = 1024
 
 # QWEN AI LLM 模型
 EMBEDDING_MODEL_QWEN = os.getenv("EMBEDDING_MODEL_QWEN", "text-embedding-v4")
@@ -115,7 +126,7 @@ QWEN_DIMENSION = 2048
 # Hybrid检索配置
 #当 α = 0 时，完全依赖稀疏检索（纯 BM25/TF-IDF）；
 #当 α = 1 时，完全依赖密集检索（纯语义向量匹配）；
-HYBRID_ALPHA = float(os.getenv('HYBRID_ALPHA', '0.3'))
+HYBRID_ALPHA = 0.3
 
 # rerank 模型
 RERANK_MODEL = os.getenv("RERANK_MODEL", "bge-reranker-v2-m3")
@@ -156,19 +167,6 @@ phrase_weight_scorer = PhraseWeightScorer(
     pmi_threshold=3.0,
     boost_factors=(0.2, 0.1, 0.0, -0.5)
 )
-
-def get_pinecone_index():
-    """
-    初始化并返回Pinecone索引对象。
-    """
-    if not PINECONE_API_KEY or not PINECONE_INDEX:
-        logger.error("Pinecone API key or index name not configured.")
-        raise ValueError("Pinecone configuration is missing.")
-    
-    pc = Pinecone(api_key=PINECONE_API_KEY)
-    index = pc.Index(PINECONE_INDEX)
-    logger.info(f"Successfully connected to Pinecone index '{PINECONE_INDEX}'.")
-    return index
 
 def get_embedding_model():
     """

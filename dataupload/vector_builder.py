@@ -31,7 +31,7 @@ vector_builder.py
 """
 import logging
 from typing import List, Dict, Any
-
+from config import OPENSEARCH_INDEX
 
 def build_vector_data(chunk: dict, embedding: list, bm25_manager, chunk_id: str, base_metadata: dict) -> dict:
     """
@@ -65,23 +65,23 @@ def build_vector_data(chunk: dict, embedding: list, bm25_manager, chunk_id: str,
         logging.error(f"[SPARSE_LOG] {chunk_id} - sparse embedding生成失败: {e}")
         sparse_embedding = None
     
-    pinecone_metadata = {
+    metadata = {
         'text': chunk['text'],
         'chunk_type': chunk.get('chunk_type', ''),
         'content_type': chunk.get('content_type', ''),
-        'faction': chunk.get('faction', base_metadata.get('faction', '未知')),
+        'faction': chunk.get('faction', base_metadata.get('faction', 'unknown')),
         'section_heading': chunk.get('section_heading', ''),
     }
     for j in range(1, 7):
-        pinecone_metadata[f'h{j}'] = chunk.get(f'h{j}', '')
-    pinecone_metadata['chunk_id'] = chunk_id
-    pinecone_metadata['source_file'] = chunk.get('source_file', '')
+        metadata[f'h{j}'] = chunk.get(f'h{j}', '')
+    metadata['chunk_id'] = chunk_id
+    metadata['source_file'] = chunk.get('source_file', '')
     
     # 记录最终构造的向量信息
     vector_data = {
         'id': chunk_id,
         'values': embedding,
-        'metadata': pinecone_metadata
+        'metadata': metadata
     }
     
     # 只有当sparse_embedding存在且不为空时才添加sparse_values字段
@@ -90,16 +90,16 @@ def build_vector_data(chunk: dict, embedding: list, bm25_manager, chunk_id: str,
         logging.info(f"[SPARSE_LOG] {chunk_id} - 向量构造完成:")
         logging.info(f"[SPARSE_LOG]   - dense向量长度: {len(embedding)}")
         logging.info(f"[SPARSE_LOG]   - sparse向量: 有 (indices: {len(sparse_embedding['indices'])})")
-        logging.info(f"[SPARSE_LOG]   - metadata字段数: {len(pinecone_metadata)}")
+        logging.info(f"[SPARSE_LOG]   - metadata字段数: {len(metadata)}")
     else:
         logging.info(f"[SPARSE_LOG] {chunk_id} - 向量构造完成:")
         logging.info(f"[SPARSE_LOG]   - dense向量长度: {len(embedding)}")
         logging.info(f"[SPARSE_LOG]   - sparse向量: 无 (跳过sparse_values字段)")
-        logging.info(f"[SPARSE_LOG]   - metadata字段数: {len(pinecone_metadata)}")
+        logging.info(f"[SPARSE_LOG]   - metadata字段数: {len(metadata)}")
     
     return vector_data
 
-def batch_upsert_vectors(pinecone_index, vectors: List[dict], batch_size: int = 100):
+def batch_upsert_vectors(db_conn, vectors: List[dict], batch_size: int = 100):
     """
     分批上传vectors到pinecone，异常处理与日志可选
     返回每个批次的成功状态列表
@@ -124,9 +124,16 @@ def batch_upsert_vectors(pinecone_index, vectors: List[dict], batch_size: int = 
         logging.info(f"[UPLOAD_LOG] 批次 {batch_num}: {len(batch)} 个向量 (有sparse: {batch_sparse_count}, 无sparse: {batch_empty_sparse_count})")
         
         try:
-            response = pinecone_index.upsert(vectors=batch)
-            # 检查Pinecone upsert的返回值
-            upserted_count = response.upserted_count
+            # 生成doc_ids: faction + "_" + (i + j)
+            doc_ids = []
+            for j, vector in enumerate(batch):
+                faction = vector.get('metadata', {}).get('faction', 'unknown')
+                doc_ids.append(f"{faction}_{i + j}")
+            
+            response = db_conn.bulk_upload_data(index_name=OPENSEARCH_INDEX, documents=batch, batch_size=batch_size, doc_ids=doc_ids)
+            # 检查bulk upload的返回值，计算成功上传的文档数量
+            upserted_count = sum(1 for item in response.get('items', []) 
+                               if item.get('index', {}).get('result') == 'created')
             logging.info(f"[DEBUG] 批次 {batch_num} - Pinecone响应: {response}")
             logging.info(f"[DEBUG] 批次 {batch_num} - upserted_count: {upserted_count}, 批次大小: {len(batch)}")
             

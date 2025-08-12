@@ -420,7 +420,7 @@ class SemanticDocumentChunker:
         Returns:
             faction字符串，格式：文档名称-分支势力
         """
-        return f"{self.document_name}-{self.faction_name}"
+        return f"{self.faction_name}"
 
     def _split_headings(self, text: str) -> List[Dict[str, Any]]:
         """

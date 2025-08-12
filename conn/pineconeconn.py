@@ -15,9 +15,11 @@ class PineconeConnection(ConnectionInterface):
         self.client = None
         self.pinecone_index = None
 
-    def search(self, query: str, filter: dict) -> list:
-        pass
-    
+
+    def dense_search(self, query: str, filter: dict, embedding_model: None) -> list:
+        return super().dense_search(query, filter, embedding_model)
+    def hybrid_search(self, query: str, filter: dict) -> list:
+        return super().hybrid_search(query, filter)
     def adaptive_data(self, chunk: dict, chunk_id: str, embedding_model, bm25_manager) -> dict:
         pass
 

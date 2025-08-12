@@ -53,7 +53,112 @@ class OpenSearchConnection(ConnectionInterface):
 
 
     #从数据库中搜索数据,这个search只负责召回检索记录,不负责答案生成
-    def search(self, query: str, filter: dict) -> list:
+    def dense_search(self, query: str, filter: dict, embedding_model=None) -> list:
+        """
+        执行 dense search
+        
+        Args:
+            query: 查询文本
+            filter: 过滤条件字典
+            embedding_model: 嵌入模型实例，用于生成查询向量
+        
+        Returns:
+            list: 搜索结果列表，每个结果包含id、score、text等字段
+        """
+        try:
+            # 1. 参数验证
+            if not embedding_model:
+                error_msg = "embedding_model实例为空，无法生成查询向量"
+                self.logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            if not query or not query.strip():
+                error_msg = "查询文本不能为空"
+                self.logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            # 2. 确保连接可用
+            self._ensure_connection()
+            
+            # 3. 生成查询向量
+            query_embedding = embedding_model.get_embedding(query)
+            if not query_embedding or len(query_embedding) != 2048:
+                error_msg = f"查询向量生成失败或维度不正确，期望2048维，实际{len(query_embedding) if query_embedding else 0}维"
+                self.logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            self.logger.info(f"查询向量生成成功，维度: {len(query_embedding)}")
+            
+            # 4. 构建搜索查询
+            search_body = {
+                "size": 10,
+                "query": {
+                    "knn": {
+                        "embedding": {
+                            "vector": query_embedding,
+                            "k": 20  # 搜索20个最近邻，从中选择top 10
+                        }
+                    }
+                }
+            }
+            
+            # 5. 添加过滤条件
+            if filter:
+                search_body["query"] = {
+                    "bool": {
+                        "must": [
+                            {
+                                "knn": {
+                                    "embedding": {
+                                        "vector": query_embedding,
+                                        "k": 20
+                                    }
+                                }
+                            }
+                        ],
+                        "filter": self._build_filter_query(filter)
+                    }
+                }
+            
+            # 6. 执行搜索
+            self.logger.info(f"执行dense search，查询: {query[:50]}...")
+            response = self.client.search(
+                index=self.index,
+                body=search_body
+            )
+            
+            # 7. 处理结果
+            results = []
+            hits = response.get('hits', {}).get('hits', [])
+            
+            for hit in hits:
+                result = {
+                    'id': hit['_id'],
+                    'score': hit['_score'],
+                    'text': hit['_source']['text'],
+                    'faction': hit['_source'].get('faction', ''),
+                    'content_type': hit['_source'].get('content_type', ''),
+                    'section_heading': hit['_source'].get('section_heading', ''),
+                    'h1': hit['_source'].get('h1', ''),
+                    'h2': hit['_source'].get('h2', ''),
+                    'h3': hit['_source'].get('h3', ''),
+                    'source_file': hit['_source'].get('source_file', ''),
+                    'chunk_index': hit['_source'].get('chunk_index', 0),
+                    'created_at': hit['_source'].get('created_at', '')
+                }
+                results.append(result)
+            
+            self.logger.info(f"Dense search 完成，返回 {len(results)} 个结果")
+            return results
+            
+        except ValueError as e:
+            # 重新抛出 ValueError，保持异常类型
+            raise
+        except Exception as e:
+            error_msg = f"Dense search 失败: {str(e)}"
+            self.logger.error(error_msg)
+            raise Exception(error_msg)
+    def hybrid_search(self, query: str, filter: dict) -> list:
         pass
     
     def heartbeat(self) -> bool:
@@ -341,5 +446,69 @@ class OpenSearchConnection(ConnectionInterface):
             
         except Exception as e:
             error_msg = f"删除 index {index_name} 数据失败: {str(e)}"
+            self.logger.error(error_msg)
+            raise Exception(error_msg)
+
+    def _build_filter_query(self, filter: dict) -> list:
+        """
+        构建过滤查询条件
+        
+        Args:
+            filter: 过滤条件字典
+        
+        Returns:
+            list: 过滤查询列表
+        """
+        filter_queries = []
+        
+        if 'faction' in filter:
+            filter_queries.append({
+                "term": {"faction": filter['faction']}
+            })
+        
+        if 'content_type' in filter:
+            filter_queries.append({
+                "term": {"content_type": filter['content_type']}
+            })
+        
+        if 'source_file' in filter:
+            filter_queries.append({
+                "term": {"source_file": filter['source_file']}
+            })
+        
+        if 'h1' in filter:
+            filter_queries.append({
+                "term": {"h1": filter['h1']}
+            })
+        
+        if 'h2' in filter:
+            filter_queries.append({
+                "term": {"h2": filter['h2']}
+            })
+        
+        if 'h3' in filter:
+            filter_queries.append({
+                "term": {"h3": filter['h3']}
+            })
+        
+        return filter_queries
+
+    def _ensure_connection(self):
+        """
+        确保OpenSearch连接可用
+        
+        Raises:
+            Exception: 当连接不可用时
+        """
+        try:
+            if not self.client:
+                raise Exception("OpenSearch客户端未初始化")
+            
+            # 执行心跳测试
+            if not self.heartbeat():
+                raise Exception("OpenSearch连接不可用")
+                
+        except Exception as e:
+            error_msg = f"连接检查失败: {str(e)}"
             self.logger.error(error_msg)
             raise Exception(error_msg)

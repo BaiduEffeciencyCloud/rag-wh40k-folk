@@ -2,9 +2,11 @@ from abc import ABC, abstractmethod
 
 class ConnectionInterface(ABC):
     @abstractmethod
-    def search(self, query: str,filter:dict) -> list:
+    def dense_search(self, query: str,filter:dict,embedding_model:None) -> list:
         pass
-    
+    @abstractmethod
+    def hybrid_search(self, query: str,filter:dict) ->list:
+        pass
     @abstractmethod
     def adaptive_data(self, chunks: list) -> dict:
         pass

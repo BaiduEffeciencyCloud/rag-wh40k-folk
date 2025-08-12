@@ -1,14 +1,18 @@
 import logging
 from typing import Any, Dict, List
+from embedding.em_factory import EmbeddingFactory
+from conn.conn_factory import ConnectionFactory
 
 logger = logging.getLogger(__name__)
 
 class RAGOrchestrator:
-    def __init__(self, query_processor, search_engine, post_search, aggregator ):
+    def __init__(self, query_processor, search_engine, post_search, aggregator, db_type, embedding_model):
         self.qp = query_processor
         self.se = search_engine
         self.agg = aggregator
         self.post_search = post_search  # 新增：PostSearchPipeline实例
+        self.db_type = db_type
+        self.embedding_model = embedding_model
 
     def run(self, query: str, top_k: int = 5, **kwargs) -> Any:
         """
@@ -35,6 +39,16 @@ class RAGOrchestrator:
         logger.info("QueryProcessor 处理结果")
         logger.info(processed)
         logger.info("="*60)
+         
+        #数据库连接实例以及嵌入式模型实例
+        conn=None
+        embedding_model=None
+        try:
+            conn=ConnectionFactory.create_conn(self.db_type)
+            embedding_model=EmbeddingFactory.create_embedding_model(self.embedding_model)
+        except Exception as e:
+            logger.error(f"创建连接或嵌入模型失败: {e}")
+            return {"error": str(e)}
 
         # 2. 检索召回
         results = self.se.search(processed, top_k=top_k)

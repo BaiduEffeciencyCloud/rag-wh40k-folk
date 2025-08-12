@@ -35,6 +35,8 @@ def main():
     parser.add_argument('--topk', type=int, default=5, help='检索返回数量')
     parser.add_argument('--ps', type=str,default='simple',help='对召回 TOP_K的处理')
     parser.add_argument('--verbose', '-v', action='store_true', help='详细输出模式')
+    parser.add_argument('--db_type', type=str, choices=['opensearch', 'pinecone'], default='opensearch', help='数据库类型')
+    parser.add_argument('--embedding_model', type=str, choices=['openai', 'qwen'], default='qwen', help='embedding模型')
     args = parser.parse_args()
 
     if args.verbose:
@@ -47,6 +49,8 @@ def main():
     print(f"SearchEngine: {args.se}")
     print(f"Aggregator: {args.agg}")
     print(f"PostSearch:{args.ps}")
+    print(f"数据库类型: {args.db_type}")
+    print(f"embedding模型: {args.embedding_model}")
 
 
     qp_type = args.qp
@@ -62,9 +66,11 @@ def main():
 
     ps_type = args.ps
     postsearch = PostSearchFactory.create_processor(ps_type)
-
+    
+    db_type = args.db_type
+    embedding_model=args.embedding_model
     # 4. 组装RAGOrchestrator
-    orchestrator = RAGOrchestrator(query_processor, search_engine, postsearch, aggregator)
+    orchestrator = RAGOrchestrator(query_processor, search_engine, postsearch, aggregator,db_type,embedding_model)
 
     # 5. 主流程统一调度
     result = orchestrator.run(args.query, top_k=args.topk)

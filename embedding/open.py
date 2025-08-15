@@ -22,12 +22,7 @@ class OpenEmbedding(EmbeddingInterface):
             openai_api_key=api_key,
             dimensions=dimensions,
             # 设置HTTP客户端的超时配置
-            request_timeout=EMBEDDING_READ_TIMEOUT,
-            # 如果需要更细粒度的控制，可以设置底层的httpx客户端
-            http_client_kwargs={
-                'timeout': EMBEDDING_READ_TIMEOUT,
-                'connect_timeout': EMBEDDING_CONNECT_TIMEOUT
-            }
+            request_timeout=EMBEDDING_READ_TIMEOUT
         )
     
     @embedding_retry_decorator()  # 使用默认配置

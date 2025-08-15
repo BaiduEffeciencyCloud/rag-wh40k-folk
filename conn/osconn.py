@@ -1,5 +1,6 @@
 import logging
 import os
+import copy
 from datetime import datetime
 from opensearchpy import OpenSearch
 from http import HTTPStatus
@@ -99,7 +100,7 @@ class OpenSearchConnection(ConnectionInterface):
                     "knn": {
                         "embedding": {
                             "vector": query_embedding,
-                            "k": 20  # 搜索20个最近邻，从中选择top 10
+                            "k": top_k
                         }
                     }
                 }
@@ -114,7 +115,7 @@ class OpenSearchConnection(ConnectionInterface):
                                 "knn": {
                                     "embedding": {
                                         "vector": query_embedding,
-                                        "k": 20
+                                        "k": top_k
                                     }
                                 }
                             }
@@ -125,6 +126,21 @@ class OpenSearchConnection(ConnectionInterface):
             
             # 6. 执行搜索
             self.logger.info(f"执行dense search，查询: {query[:50]}...")
+            
+            # 记录搜索参数（去掉embedding向量的具体数字）
+
+            debug_search_body = copy.deepcopy(search_body)
+            if 'query' in debug_search_body and 'knn' in debug_search_body['query']:
+                debug_search_body['query']['knn']['embedding']['vector'] = f"[向量数据，维度: {len(query_embedding)}]"
+            elif 'query' in debug_search_body and 'bool' in debug_search_body['query']:
+                if 'must' in debug_search_body['query']['bool'] and debug_search_body['query']['bool']['must']:
+                    for must_item in debug_search_body['query']['bool']['must']:
+                        if 'knn' in must_item:
+                            must_item['knn']['embedding']['vector'] = f"[向量数据，维度: {len(query_embedding)}]"
+            
+            self.logger.info(f"搜索参数: {debug_search_body}")
+            
+            # 确保使用原始的search_body进行搜索
             response = self.client.search(
                 index=self.index,
                 body=search_body
@@ -133,6 +149,11 @@ class OpenSearchConnection(ConnectionInterface):
             # 7. 处理结果
             # 直接返回原始的OpenSearch响应结构，格式转换由搜索引擎层处理
             hits = response.get('hits', {})
+            
+            # 记录前几个结果的分数，用于调试
+            if hits.get('hits'):
+                scores = [hit.get('_score', 0) for hit in hits['hits'][:top_k]]
+                self.logger.info(f"前top_k个结果分数: {scores}")
             
             self.logger.info(f"Dense search 完成，返回 {hits.get('total', {}).get('value', 0)} 个结果")
             return hits
@@ -501,6 +522,7 @@ class OpenSearchConnection(ConnectionInterface):
         Returns:
             List[Dict]: 重排序后的结果列表，格式与 pineconeRerank 兼容
         """
+        self.logger.info(f"rerank 开始，query: {query[:50]}...，文档数量: {len(candidates)}，模型: {model}")
         try:
             # 1. 参数验证
             if not query or not query.strip():
@@ -541,8 +563,6 @@ class OpenSearchConnection(ConnectionInterface):
             
             # 5. 处理响应结果
             if response.status_code == HTTPStatus.OK:
-                # 成功响应，处理结果
-                rerank_results = []
                 
                 # 根据 dashscope TextReRank API 的实际返回结构处理
                 # 对于 gte-rerank-v2 模型，返回结构可能是不同的

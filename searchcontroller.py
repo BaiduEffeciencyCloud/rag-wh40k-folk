@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--agg', type=str, default='simple', help='答案聚合器类型（预留）')
     parser.add_argument('--topk', type=int, default=5, help='检索返回数量')
     parser.add_argument('--ps', type=str,default='simple',help='对召回 TOP_K的处理')
+    parser.add_argument('--rerank', action='store_true', help='是否启用rerank')
     parser.add_argument('--verbose', '-v', action='store_true', help='详细输出模式')
     parser.add_argument('--db_type', type=str, choices=['opensearch', 'pinecone'], default='opensearch', help='数据库类型')
     parser.add_argument('--embedding_model', type=str, choices=['openai', 'qwen'], default='qwen', help='embedding模型')
@@ -49,6 +50,7 @@ def main():
     print(f"SearchEngine: {args.se}")
     print(f"Aggregator: {args.agg}")
     print(f"PostSearch:{args.ps}")
+    print(f"Rerank: {args.rerank}")
     print(f"数据库类型: {args.db_type}")
     print(f"embedding模型: {args.embedding_model}")
     print(f"topk: {args.topk}")
@@ -70,14 +72,15 @@ def main():
 
     db_type = args.db_type
     embedding_model=args.embedding_model
+    rerank_enabled = args.rerank
     # 4. 组装RAGOrchestrator（重构后不再传递db_type和embedding_model）
     orchestrator = RAGOrchestrator(query_processor, search_engine, postsearch, aggregator)
 
-    # 5. 主流程统一调度（通过run方法传递db_type和embedding_model）
-    result = orchestrator.run(args.query, top_k=args.topk, db_type=db_type, embedding_model=embedding_model)
+    # 5. 主流程统一调度（通过run方法传递db_type、embedding_model和rerank参数）
+    result = orchestrator.run(args.query, top_k=args.topk, db_type=db_type, embedding_model=embedding_model, rerank=rerank_enabled)
 
     print_separator("Orchestrator 聚合结果")
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    #print(json.dumps(result, ensure_ascii=False, indent=2))
     print_separator("最终答案")
     print(result.get('final_answer', '无答案'))
     print_separator("流程结束")

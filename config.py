@@ -115,7 +115,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
 LLM_IMAGE_MODEL=os.getenv("LLM_IMAGE_MODEL", "gpt-4o")
 # 嵌入模型
 EMBADDING_MODEL = os.getenv("EMBADDING_MODEL", "text-embedding-3-large")
-OPENAI_DIMENSION = 1024
+OPENAI_DIMENSION = 2048
 
 # QWEN AI LLM 模型
 EMBEDDING_MODEL_QWEN = os.getenv("EMBEDDING_MODEL_QWEN", "text-embedding-v4")

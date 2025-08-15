@@ -48,7 +48,7 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
             raise
     
     def search(self, query: Union[str, Dict[str, Any]], top_k: int = 10, 
-               db_conn=None, embedding_model=None, **kwargs) -> List[Dict[str, Any]]:
+               db_conn=None, embedding_model=None, rerank: bool = True, **kwargs) -> List[Dict[str, Any]]:
         """
         执行dense向量搜索
         Args:
@@ -102,11 +102,25 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
                 # 格式转换：OpenSearch → Pinecone
                 formatted_results = self.format_result(opensearch_results)
                 
-                # 继续使用现有的 rerank 和 composite 逻辑
-                rerank_results = db_conn.rerank(query_text, formatted_results, RERANK_TOPK, model=ALIYUN_RERANK_MODEL)
-                results = self.composite(rerank_results, query_text, 'dense')
+                # 根据rerank参数决定是否执行rerank
+                if rerank:
+                    # 执行rerank
+                    rerank_results = db_conn.rerank(query_text, formatted_results, RERANK_TOPK, model=ALIYUN_RERANK_MODEL)
+                    results = self.composite(rerank_results, query_text, 'dense')
+                    logger.info(f"Dense搜索完成（启用rerank），查询: {query_text[:50]}...，返回 {len(results)} 个结果")
+                else:
+                    # 跳过rerank，需要将formatted_results转换为composite格式
+                    results = self._format_without_rerank(formatted_results, query_text, 'dense')
+                    logger.info(f"Dense搜索完成（跳过rerank），查询: {query_text[:50]}...，返回 {len(results)} 个结果")
                 
-                logger.info(f"Dense搜索完成，查询: {query_text[:50]}...，返回 {len(results)} 个结果")
+                # 添加结果格式调试信息
+                if results and len(results) > 0:
+                    logger.info(f"返回结果数量: {len(results)}")
+                    logger.info(f"第一个结果格式: {list(results[0].keys()) if results[0] else 'None'}")
+                    logger.info(f"第一个结果内容: {results[0] if results[0] else 'None'}")
+                else:
+                    logger.warning("返回结果为空或None")
+                
                 return results
             else:
                 logger.error("传入的数据库连接不支持 dense_search 方法")
@@ -164,4 +178,35 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
             }
             formatted_results.append(formatted_result)
         
-        return formatted_results 
+        return formatted_results
+    
+    def _format_without_rerank(self, formatted_results: List[Dict], query_text: str, search_engine: str) -> List[Dict]:
+        """
+        跳过rerank时，将formatted_results转换为与composite一致的格式
+        
+        Args:
+            formatted_results: format_result方法返回的结果
+            query_text: 查询文本
+            search_engine: 搜索引擎类型
+            
+        Returns:
+            List[Dict]: 与composite格式一致的结果列表
+        """
+        results = []
+        for i, item in enumerate(formatted_results):
+            result = {
+                'doc_id': item.get('id', i),  # 使用原始ID或索引
+                'text': item.get('text', ''),
+                'score': item.get('score', 0.0),  # 保持原始向量分数
+                'search_type': search_engine,
+                'query': query_text,
+                # 保留重要元数据，确保postsearch模块能正常处理
+                'faction': item.get('faction', ''),
+                'content_type': item.get('content_type', ''),
+                'section_heading': item.get('section_heading', ''),
+                'source_file': item.get('source_file', ''),
+                'chunk_index': item.get('chunk_index', 0)
+            }
+            results.append(result)
+        
+        return results 

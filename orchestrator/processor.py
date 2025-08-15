@@ -21,7 +21,7 @@ class RAGOrchestrator:
         self.agg = aggregator
         self.post_search = post_search
 
-    def run(self, query: str, top_k: int = 5, db_type: str = None, embedding_model: str = None, **kwargs) -> Any:
+    def run(self, query: str, top_k: int = 5, db_type: str = None, embedding_model: str = None, rerank: bool = True, **kwargs) -> Any:
         """
         RAG主流程调度：处理query、检索、聚合，返回最终结果。
         
@@ -73,15 +73,27 @@ class RAGOrchestrator:
         results = self.se.search(processed, top_k=top_k, 
                                db_conn=db_conn, 
                                embedding_model=embedding_instance,
+                               rerank=rerank,
                                **kwargs)
 
         # 4. Post-Search 处理
         if self.post_search:
             logger.info("开始进行搜索后的优化处理:")
+            logger.info(f"PostSearch处理前，结果数量: {len(results) if results else 0}")
+            if results and len(results) > 0:
+                logger.info(f"PostSearch处理前，第一个结果: {results[0]}")
             results = self.post_search.process(results, embedding_model=embedding_instance)
+            logger.info(f"PostSearch处理后，结果数量: {len(results) if results else 0}")
+            if results and len(results) > 0:
+                logger.info(f"PostSearch处理后，第一个结果: {results[0]}")
 
         # 5. 聚合
+        logger.info("开始进行聚合处理:")
+        logger.info(f"聚合前，结果数量: {len(results) if results else 0}")
+        if results and len(results) > 0:
+            logger.info(f"聚合前，第一个结果: {results[0]}")
         result = self.agg.aggregate(results, query, params=kwargs)
+        logger.info(f"聚合后，结果: {result}")
 
         logger.info("流程结束")
         logger.info("✅ 全流程执行完毕")

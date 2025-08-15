@@ -4,8 +4,11 @@ from datetime import datetime
 from opensearchpy import OpenSearch
 from http import HTTPStatus
 from .coninterface import ConnectionInterface
-from config import OPENSEARCH_URI, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD, OPENSEARCH_INDEX, EMBEDDING_MODEL_QWEN, QWEN_DIMENSION
+from config import OPENSEARCH_URI, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD, OPENSEARCH_INDEX, EMBEDDING_MODEL_QWEN, QWEN_DIMENSION, ALIYUN_RERANK_MODEL, RERANK_TOPK
 from opensearchpy import OpenSearch
+from typing import List, Dict
+import dashscope
+from http import HTTPStatus
 
 
 # Opensearch数据库的处理类,负责数据转化,数据上传,数据搜索
@@ -53,7 +56,7 @@ class OpenSearchConnection(ConnectionInterface):
 
 
     #从数据库中搜索数据,这个search只负责召回检索记录,不负责答案生成
-    def dense_search(self, query: str, filter: dict, embedding_model=None) -> list:
+    def dense_search(self, query: str, filter: dict, embedding_model=None, top_k:int=20) -> list:
         """
         执行 dense search
         
@@ -91,7 +94,7 @@ class OpenSearchConnection(ConnectionInterface):
             
             # 4. 构建搜索查询
             search_body = {
-                "size": 10,
+                "size": top_k,
                 "query": {
                     "knn": {
                         "embedding": {
@@ -128,28 +131,11 @@ class OpenSearchConnection(ConnectionInterface):
             )
             
             # 7. 处理结果
-            results = []
-            hits = response.get('hits', {}).get('hits', [])
+            # 直接返回原始的OpenSearch响应结构，格式转换由搜索引擎层处理
+            hits = response.get('hits', {})
             
-            for hit in hits:
-                result = {
-                    'id': hit['_id'],
-                    'score': hit['_score'],
-                    'text': hit['_source']['text'],
-                    'faction': hit['_source'].get('faction', ''),
-                    'content_type': hit['_source'].get('content_type', ''),
-                    'section_heading': hit['_source'].get('section_heading', ''),
-                    'h1': hit['_source'].get('h1', ''),
-                    'h2': hit['_source'].get('h2', ''),
-                    'h3': hit['_source'].get('h3', ''),
-                    'source_file': hit['_source'].get('source_file', ''),
-                    'chunk_index': hit['_source'].get('chunk_index', 0),
-                    'created_at': hit['_source'].get('created_at', '')
-                }
-                results.append(result)
-            
-            self.logger.info(f"Dense search 完成，返回 {len(results)} 个结果")
-            return results
+            self.logger.info(f"Dense search 完成，返回 {hits.get('total', {}).get('value', 0)} 个结果")
+            return hits
             
         except ValueError as e:
             # 重新抛出 ValueError，保持异常类型
@@ -158,7 +144,8 @@ class OpenSearchConnection(ConnectionInterface):
             error_msg = f"Dense search 失败: {str(e)}"
             self.logger.error(error_msg)
             raise Exception(error_msg)
-    def hybrid_search(self, query: str, filter: dict) -> list:
+        
+    def hybrid_search(self, query: str, filter: dict, top_k:int=20) -> list:
         pass
     
     def heartbeat(self) -> bool:
@@ -186,26 +173,26 @@ class OpenSearchConnection(ConnectionInterface):
             self.logger.error(f"OpenSearch心跳检测失败: {str(e)}")
             return False
 
-    def adaptive_data(self, chunk: dict, chunk_id: str, embedding_model, bm25_manager) -> dict:
+    def adaptive_data(self, chunk: dict, chunk_id: str, bm25_manager, pre_generated_embedding: list = None) -> dict:
         """
         将单个chunk数据转换成适合OpenSearch的格式
         
         Args:
             chunk: 单个chunk数据，包含text和metadata
             chunk_id: 文档ID
-            embedding_model: 用于生成dense向量的模型实例
             bm25_manager: 用于生成sparse向量的管理器实例
+            pre_generated_embedding: 预生成的dense向量，如果提供则直接使用
             
         Returns:
             dict: 转换后的OpenSearch文档格式
             
         Raises:
-            ValueError: 当embedding_model或bm25_manager为空时
+            ValueError: 当pre_generated_embedding为空且无法生成向量时
             Exception: 当向量生成或数据处理失败时
         """
         # 1. 参数验证和日志记录
-        if not embedding_model:
-            error_msg = "embedding_model实例为空，无法生成dense向量"
+        if not pre_generated_embedding:
+            error_msg = "pre_generated_embedding为空，无法生成dense向量"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
         
@@ -214,25 +201,12 @@ class OpenSearchConnection(ConnectionInterface):
             self.logger.error(error_msg)
             raise ValueError(error_msg)
         
-        self.logger.info(f"开始处理chunk {chunk_id}，使用embedding_model: {type(embedding_model).__name__}")
+        self.logger.info(f"开始处理chunk {chunk_id}")
         
         try:
-            # 2. 生成dense向量
-            # QWEN使用TextEmbedding.call()类方法调用
-            resp = embedding_model.call(
-                model=EMBEDDING_MODEL_QWEN,
-                input=chunk['text'],
-                text_type="document",
-                dimension=QWEN_DIMENSION
-            )
-            
-            if resp.status_code != HTTPStatus.OK:
-                error_msg = f"chunk {chunk_id} dense向量生成失败: {resp.code}, {resp.message}"
-                self.logger.error(error_msg)
-                raise Exception(error_msg)
-                
-            dense_vector = resp.output['embeddings'][0]['embedding']
-            self.logger.info(f"chunk {chunk_id} dense向量生成成功，维度: {len(dense_vector)}")
+            # 2. 使用预生成的embedding
+            dense_vector = pre_generated_embedding
+            self.logger.info(f"chunk {chunk_id} 使用预生成的dense向量，维度: {len(dense_vector)}")
             
             # 3. 生成sparse向量
             sparse_vector = bm25_manager.get_sparse_vector(chunk['text'])
@@ -251,7 +225,7 @@ class OpenSearchConnection(ConnectionInterface):
             
             # 4. 构造OpenSearch文档
             document = {
-                '_id': chunk_id,
+                'id': chunk_id,
                 'text': chunk['text'],
                 'embedding': dense_vector,
                 'sparse': sparse_vector,
@@ -512,3 +486,210 @@ class OpenSearchConnection(ConnectionInterface):
             error_msg = f"连接检查失败: {str(e)}"
             self.logger.error(error_msg)
             raise Exception(error_msg)
+        
+    def rerank(self, query: str, candidates: List[Dict], top_k: int = RERANK_TOPK, model: str = None, **kwargs) -> List[Dict]:
+        """
+        使用 dashscope TextReRank API 重排序搜索结果
+        
+        Args:
+            query: 查询文本
+            candidates: 候选文档列表，每个文档包含 text 字段
+            top_k: 重排序后返回的文档数量
+            model: 重排序模型名称，默认使用 config.ALIYUN_RERANK_MODEL
+            **kwargs: 其他参数
+            
+        Returns:
+            List[Dict]: 重排序后的结果列表，格式与 pineconeRerank 兼容
+        """
+        try:
+            # 1. 参数验证
+            if not query or not query.strip():
+                self.logger.warning("查询文本为空，返回空列表")
+                return []
+            
+            if not candidates:
+                self.logger.info("候选文档为空，返回空列表")
+                return []
+            
+            # 2. 提取文档文本
+            documents = []
+            valid_candidates = []
+            
+            for candidate in candidates:
+                if 'text' in candidate and candidate['text']:
+                    documents.append(candidate['text'])
+                    valid_candidates.append(candidate)
+            
+            if not documents:
+                self.logger.warning("没有有效的文档文本，返回空列表")
+                return []
+            
+            # 3. 设置模型参数
+            rerank_model = model or ALIYUN_RERANK_MODEL
+            top_n = min(top_k, len(documents))
+            
+            self.logger.info(f"开始重排序，查询: {query[:50]}...，文档数量: {len(documents)}，模型: {rerank_model}")
+            
+            # 4. 调用 dashscope TextReRank API
+            response = dashscope.TextReRank.call(
+                model=rerank_model,
+                query=query,
+                documents=documents,
+                top_n=top_n,
+                return_documents=True
+            )
+            
+            # 5. 处理响应结果
+            if response.status_code == HTTPStatus.OK:
+                # 成功响应，处理结果
+                rerank_results = []
+                
+                # 根据 dashscope TextReRank API 的实际返回结构处理
+                # 对于 gte-rerank-v2 模型，返回结构可能是不同的
+                rerank_results = []
+                
+                # 检查 response 的基本结构
+                if hasattr(response, 'output') and hasattr(response.output, 'results'):
+                    results = response.output.results
+                    self.logger.info(f"找到 {len(results)} 个重排序结果")
+                    
+                    # 处理每个结果
+                    for i, result in enumerate(results):
+                        try:
+                            # 根据调试结果，ReRankResult 对象有 index 和 relevance_score 属性
+                            if hasattr(result, 'index'):
+                                index = result.index
+                            else:
+                                index = i
+                            
+                            if hasattr(result, 'relevance_score'):
+                                score = result.relevance_score
+                            else:
+                                self.logger.warning(f"结果 {i} 没有找到 relevance_score 属性，跳过")
+                                continue
+                            
+                            # 验证 score 的有效性
+                            if not isinstance(score, (int, float)):
+                                self.logger.warning(f"结果 {i} 的 score 类型无效: {type(score)}, 值: {score}")
+                                continue
+                            
+                            if index < len(valid_candidates):
+                                # 获取原始候选文档
+                                original_candidate = valid_candidates[index]
+                                
+                                # 创建重排序结果
+                                rerank_result = {
+                                    'index': index,
+                                    'score': score,
+                                    'document': {
+                                        'text': original_candidate['text']
+                                    }
+                                }
+                                rerank_results.append(rerank_result)
+                                self.logger.info(f"成功处理结果 {i}: index={index}, score={score}")
+                            else:
+                                self.logger.warning(f"结果 {i} 的 index {index} 超出候选文档范围")
+                                
+                        except Exception as e:
+                            self.logger.error(f"处理结果 {i} 时发生错误: {str(e)}")
+                            continue
+                    
+                    # 按 score 排序
+                    if rerank_results:
+                        rerank_results.sort(key=lambda x: x['score'], reverse=True)
+                        self.logger.info(f"重排序完成，返回 {len(rerank_results)} 个结果")
+                        return rerank_results
+                    else:
+                        self.logger.warning("没有有效的重排序结果，使用降级策略")
+                        return self._fallback_to_original_candidates(candidates, top_k)
+                else:
+                    self.logger.error("Response 结构不符合预期，使用降级策略")
+                    return self._fallback_to_original_candidates(candidates, top_k)
+            else:
+                # API 调用失败，记录错误并返回原始候选文档
+                self.logger.error(f"dashscope rerank API 调用失败: {response.message}")
+                return self._fallback_to_original_candidates(candidates, top_k)
+                
+        except Exception as e:
+            # 异常处理，返回原始候选文档
+            self.logger.error(f"rerank 过程发生错误: {str(e)}")
+            return self._fallback_to_original_candidates(candidates, top_k)
+    
+    def _fallback_to_original_candidates(self, candidates: List[Dict], top_k: int) -> List[Dict]:
+        """
+        降级策略：返回原始候选文档
+        
+        Args:
+            candidates: 原始候选文档列表
+            top_k: 返回的文档数量
+            
+        Returns:
+            List[Dict]: 格式化的原始候选文档
+        """
+        try:
+            fallback_results = []
+            for i, candidate in enumerate(candidates[:top_k]):
+                if 'text' in candidate:
+                    fallback_result = {
+                        'index': i,
+                        'score': candidate.get('score', 0.0),
+                        'document': {
+                            'text': candidate['text']
+                        }
+                    }
+                    fallback_results.append(fallback_result)
+            
+            self.logger.info(f"使用降级策略，返回 {len(fallback_results)} 个原始候选文档")
+            return fallback_results
+            
+        except Exception as e:
+            self.logger.error(f"降级策略执行失败: {str(e)}")
+            return []
+
+    def get_sample_data(self, size: int = 1) -> List[Dict]:
+        """
+        获取索引中的样本数据
+        
+        Args:
+            size: 返回的样本数量，默认1条
+            
+        Returns:
+            List[Dict]: 样本数据列表
+        """
+        try:
+            if not self.client:
+                raise Exception("OpenSearch客户端未初始化")
+            
+            # 构建查询，获取指定数量的样本
+            search_body = {
+                "size": size,
+                "query": {
+                    "match_all": {}
+                }
+            }
+            
+            # 执行搜索
+            response = self.client.search(
+                index=self.index,
+                body=search_body
+            )
+            
+            # 处理结果
+            results = []
+            hits = response.get('hits', {}).get('hits', [])
+            
+            for hit in hits:
+                sample_data = {
+                    '_id': hit['_id'],
+                    '_score': hit['_score'],
+                    '_source': hit['_source']
+                }
+                results.append(sample_data)
+            
+            self.logger.info(f"成功获取 {len(results)} 条样本数据")
+            return results
+            
+        except Exception as e:
+            error_msg = f"获取样本数据失败: {str(e)}"
+            self.logger.error(error_msg)
+            return []

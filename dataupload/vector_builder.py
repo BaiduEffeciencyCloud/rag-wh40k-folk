@@ -29,10 +29,47 @@ vector_builder.py
 - 代码可读性、可维护性优先
 
 """
+import os
+import sys
+import json
+import argparse
 import logging
 from typing import List, Dict, Any
-from config import OPENSEARCH_INDEX
+import glob
+from datetime import datetime
+from dataupload.bm25_manager import BM25Manager
+from dataupload.bm25_config import BM25Config
+from conn.conn_factory import ConnectionFactory
 
+
+#根据db_str的类型，生成符合不同数据库类型的上传文档格式
+def build_vector_via_db(chunk: dict, embedding: list, bm25_manager, chunk_id: str, base_metadata: dict, db_str: str) -> dict:
+    """
+    根据db_str的类型，生成符合不同数据库类型的上传文档格式
+    
+    Args:
+        chunk: 文档切片数据
+        embedding: 稠密向量（已生成）
+        bm25_manager: BM25管理器实例
+        chunk_id: 切片ID
+        base_metadata: 基础元数据
+        db_str: 数据库类型字符串
+    
+    Returns:
+        dict: 对应数据库格式的向量数据
+    """
+    db_conn = ConnectionFactory.create_conn(db_str)
+    
+    if db_str == "opensearch":
+        # 对于 OpenSearch，直接调用 adaptive_data 方法，传递预生成的 embedding
+        result = db_conn.adaptive_data(chunk, chunk_id, bm25_manager, pre_generated_embedding=embedding)
+    else:
+        # 对于其他数据库类型，调用原有的build_vector_data方法
+        result = build_vector_data(chunk, embedding, bm25_manager, chunk_id, base_metadata)
+    
+    return result
+
+# 生成pinecone格式的上传文档格式
 def build_vector_data(chunk: dict, embedding: list, bm25_manager, chunk_id: str, base_metadata: dict) -> dict:
     """
     构造包含sparse_values的pinecone向量dict
@@ -99,10 +136,16 @@ def build_vector_data(chunk: dict, embedding: list, bm25_manager, chunk_id: str,
     
     return vector_data
 
-def batch_upsert_vectors(db_conn, vectors: List[dict], batch_size: int = 100):
+def batch_upsert_vectors(db_conn, vectors: List[dict], batch_size: int = 100, index_name: str = None):
     """
-    分批上传vectors到pinecone，异常处理与日志可选
+    分批上传vectors到数据库，异常处理与日志可选
     返回每个批次的成功状态列表
+    
+    Args:
+        db_conn: 数据库连接对象
+        vectors: 待上传的向量列表
+        batch_size: 批次大小，默认100
+        index_name: 索引名称，如果为None则使用数据库连接的默认索引
     """
     total = len(vectors)
     logging.info(f"[UPLOAD_LOG] 开始批量上传，总向量数: {total}")
@@ -124,13 +167,20 @@ def batch_upsert_vectors(db_conn, vectors: List[dict], batch_size: int = 100):
         logging.info(f"[UPLOAD_LOG] 批次 {batch_num}: {len(batch)} 个向量 (有sparse: {batch_sparse_count}, 无sparse: {batch_empty_sparse_count})")
         
         try:
-            # 生成doc_ids: faction + "_" + (i + j)
+            # 使用adaptive_data已经设置的ID，而不是重新生成
             doc_ids = []
             for j, vector in enumerate(batch):
-                faction = vector.get('metadata', {}).get('faction', 'unknown')
-                doc_ids.append(f"{faction}_{i + j}")
+                # 优先使用vector中已经设置的id字段
+                if 'id' in vector:
+                    doc_ids.append(vector['id'])
+                else:
+                    # 如果没有id字段，则使用faction前缀生成
+                    faction = vector.get('metadata', {}).get('faction', 'unknown')
+                    doc_ids.append(f"{faction}_{i + j}")
             
-            response = db_conn.bulk_upload_data(index_name=OPENSEARCH_INDEX, documents=batch, batch_size=batch_size, doc_ids=doc_ids)
+            # 如果没有指定index_name，使用数据库连接的默认索引
+            actual_index_name = index_name or getattr(db_conn, 'index', 'default')
+            response = db_conn.bulk_upload_data(index_name=actual_index_name, documents=batch, batch_size=batch_size, doc_ids=doc_ids)
             # 检查bulk upload的返回值，计算成功上传的文档数量
             upserted_count = sum(1 for item in response.get('items', []) 
                                if item.get('index', {}).get('result') == 'created')

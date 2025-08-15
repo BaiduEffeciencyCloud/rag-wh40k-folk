@@ -20,22 +20,19 @@ class PostSearchFactory:
             'dedup': DedupProcessor
         }
     @staticmethod
-    def create_processor(processor_name: str) -> PostSearchInterface:
+    def create_processor(processor_name: str, **kwargs) -> PostSearchInterface:
         """
         创建指定的处理器实例
         Args:
             processor_name: 处理器名称（如'simple', 'rerank', 'mmr', 'dedup'）
+            **kwargs: 传递给处理器的参数
         Returns:
             处理器实例
         Raises:
             ValueError: 当处理器名称不存在时
         """
-        processors = {
-            'simple': FilterProcessor,
-            'rerank': RerankProcessor,
-            'mmr': MMRProcessor,
-            'dedup': DedupProcessor
-        }
+        # 使用类级别的处理器字典，支持动态注册
+        processors = PostSearchFactory._get_processors()
         
         if processor_name not in processors:
             available_processors = list(processors.keys())
@@ -43,12 +40,24 @@ class PostSearchFactory:
         
         processor_class = processors[processor_name]
         try:
-            processor = processor_class()
+            processor = processor_class(**kwargs)
             logger.info(f"成功创建处理器: {processor_name}")
             return processor
         except Exception as e:
             logger.error(f"创建处理器 {processor_name} 失败: {str(e)}")
             raise
+    
+    @classmethod
+    def _get_processors(cls):
+        """获取处理器字典，支持动态注册"""
+        if not hasattr(cls, '_static_processors'):
+            cls._static_processors = {
+                'simple': FilterProcessor,
+                'rerank': RerankProcessor,
+                'mmr': MMRProcessor,
+                'dedup': DedupProcessor
+            }
+        return cls._static_processors.copy()
     
     def create_processors(self, processor_names: List[str]) -> List[PostSearchInterface]:
         """
@@ -70,9 +79,11 @@ class PostSearchFactory:
         Returns:
             可用处理器名称列表
         """
-        return list(self._processors.keys())
+        # 使用类级别的处理器字典，支持动态注册
+        return list(self._get_processors().keys())
     
-    def register_processor(self, name: str, processor_class: type):
+    @classmethod
+    def register_processor(cls, name: str, processor_class: type):
         """
         注册新的处理器类
         Args:
@@ -82,7 +93,15 @@ class PostSearchFactory:
         if not issubclass(processor_class, PostSearchInterface):
             raise ValueError(f"处理器类 {processor_class.__name__} 必须继承 PostSearchInterface")
         
-        self._processors[name] = processor_class
+        # 更新静态处理器字典
+        if not hasattr(cls, '_static_processors'):
+            cls._static_processors = {}
+        cls._static_processors[name] = processor_class
+        
+        # 更新实例处理器字典
+        if hasattr(cls, '_processors'):
+            cls._processors[name] = processor_class
+        
         logger.info(f"注册新处理器: {name} -> {processor_class.__name__}")
     
     def validate_strategy(self, strategy: List[str]) -> bool:

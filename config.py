@@ -130,6 +130,7 @@ HYBRID_ALPHA = 0.3
 
 # rerank 模型
 RERANK_MODEL = os.getenv("RERANK_MODEL", "bge-reranker-v2-m3")
+ALIYUN_RERANK_MODEL = os.getenv("ALIYUN_RERANK_MODEL", "gte-rerank-v2")
 RERANK_TOPK = 20
 
 # BM25相关配置

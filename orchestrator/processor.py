@@ -6,20 +6,30 @@ from conn.conn_factory import ConnectionFactory
 logger = logging.getLogger(__name__)
 
 class RAGOrchestrator:
-    def __init__(self, query_processor, search_engine, post_search, aggregator, db_type, embedding_model):
+    def __init__(self, query_processor, search_engine, post_search, aggregator):
+        """
+        初始化 RAG 编排器
+        
+        Args:
+            query_processor: 查询处理器
+            search_engine: 搜索引擎
+            post_search: 后处理组件
+            aggregator: 聚合器
+        """
         self.qp = query_processor
         self.se = search_engine
         self.agg = aggregator
-        self.post_search = post_search  # 新增：PostSearchPipeline实例
-        self.db_type = db_type
-        self.embedding_model = embedding_model
+        self.post_search = post_search
 
-    def run(self, query: str, top_k: int = 5, **kwargs) -> Any:
+    def run(self, query: str, top_k: int = 5, db_type: str = None, embedding_model: str = None, **kwargs) -> Any:
         """
         RAG主流程调度：处理query、检索、聚合，返回最终结果。
+        
         Args:
             query: 用户查询
             top_k: 检索返回数量
+            db_type: 数据库类型（opensearch, pinecone等）
+            embedding_model: 嵌入模型类型（qwen, openai等）
             **kwargs: 其他可选参数
         Returns:
             聚合后的结果
@@ -40,24 +50,37 @@ class RAGOrchestrator:
         logger.info(processed)
         logger.info("="*60)
          
-        #数据库连接实例以及嵌入式模型实例
-        conn=None
-        embedding_model=None
-        try:
-            conn=ConnectionFactory.create_conn(self.db_type)
-            embedding_model=EmbeddingFactory.create_embedding_model(self.embedding_model)
-        except Exception as e:
-            logger.error(f"创建连接或嵌入模型失败: {e}")
-            return {"error": str(e)}
+        # 2. 实例化数据库连接和嵌入模型
+        db_conn = None
+        if db_type:
+            try:
+                db_conn = ConnectionFactory.create_conn(db_type)
+                logger.info(f"成功创建数据库连接: {db_type}")
+            except Exception as e:
+                logger.error(f"创建数据库连接失败: {str(e)}")
+                raise RuntimeError(f"无法创建数据库连接 {db_type}: {str(e)}")
+        
+        embedding_instance = None
+        if embedding_model:
+            try:
+                embedding_instance = EmbeddingFactory.create_embedding_model(embedding_model)
+                logger.info(f"成功创建嵌入模型: {embedding_model}")
+            except Exception as e:
+                logger.error(f"创建嵌入模型失败: {str(e)}")
+                raise RuntimeError(f"无法创建嵌入模型 {embedding_model}: {str(e)}")
+        
+        # 3. 检索召回
+        results = self.se.search(processed, top_k=top_k, 
+                               db_conn=db_conn, 
+                               embedding_model=embedding_instance,
+                               **kwargs)
 
-        # 2. 检索召回
-        results = self.se.search(processed, top_k=top_k)
-
-        # 2.5 Post-Search 处理（简化调用）
+        # 4. Post-Search 处理
         if self.post_search:
-            results = self.post_search.process(results)
+            logger.info("开始进行搜索后的优化处理:")
+            results = self.post_search.process(results, embedding_model=embedding_instance)
 
-        # 3. 聚合
+        # 5. 聚合
         result = self.agg.aggregate(results, query, params=kwargs)
 
         logger.info("流程结束")

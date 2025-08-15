@@ -51,6 +51,7 @@ def main():
     print(f"PostSearch:{args.ps}")
     print(f"数据库类型: {args.db_type}")
     print(f"embedding模型: {args.embedding_model}")
+    print(f"topk: {args.topk}")
 
 
     qp_type = args.qp
@@ -66,14 +67,14 @@ def main():
 
     ps_type = args.ps
     postsearch = PostSearchFactory.create_processor(ps_type)
-    
+
     db_type = args.db_type
     embedding_model=args.embedding_model
-    # 4. 组装RAGOrchestrator
-    orchestrator = RAGOrchestrator(query_processor, search_engine, postsearch, aggregator,db_type,embedding_model)
+    # 4. 组装RAGOrchestrator（重构后不再传递db_type和embedding_model）
+    orchestrator = RAGOrchestrator(query_processor, search_engine, postsearch, aggregator)
 
-    # 5. 主流程统一调度
-    result = orchestrator.run(args.query, top_k=args.topk)
+    # 5. 主流程统一调度（通过run方法传递db_type和embedding_model）
+    result = orchestrator.run(args.query, top_k=args.topk, db_type=db_type, embedding_model=embedding_model)
 
     print_separator("Orchestrator 聚合结果")
     print(json.dumps(result, ensure_ascii=False, indent=2))

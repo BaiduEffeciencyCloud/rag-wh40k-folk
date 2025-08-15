@@ -9,7 +9,7 @@ from pinecone import Pinecone
 
 # 动态添加项目根目录到模块搜索路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import OPENAI_API_KEY, EMBADDING_MODEL,PINECONE_API_KEY,RERANK_TOPK
+from config import OPENAI_API_KEY, EMBADDING_MODEL,PINECONE_API_KEY,RERANK_TOPK,ALIYUN_RERANK_MODEL
 from .search_interface import SearchEngineInterface
 from .base_search import BaseSearchEngine
 
@@ -20,9 +20,9 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
     
     def __init__(self, pinecone_api_key: str = None, index_name: str = None, openai_api_key: str = None, pinecone_environment: str = None):
         # 初始化 Pinecone 实例用于 inference.rerank
-        self.pc = Pinecone(api_key=PINECONE_API_KEY)
-        super().__init__(pinecone_api_key, index_name, openai_api_key, pinecone_environment)
-        logger.info(f"Dense搜索引擎初始化完成，索引: {self.index_name}, 环境: {self.pinecone_environment}")
+        #self.pc = Pinecone(api_key=PINECONE_API_KEY)
+        #super().__init__(pinecone_api_key, index_name, openai_api_key, pinecone_environment)
+        pass
     
     def get_embedding(self, text: str) -> List[float]:
         """
@@ -33,20 +33,29 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
             向量表示
         """
         try:
-            # 使用config中的get_embedding_model()方法，确保维度一致
-            embeddings = get_embedding_model()
-            embedding = embeddings.embed_query(text)
+            # 优先使用传入的嵌入模型实例
+            if hasattr(self, 'embedding_model') and self.embedding_model:
+                embedding = self.embedding_model.get_embedding(text)
+                logger.info("使用传入的嵌入模型实例生成向量")
+            else:
+                # 使用config中的get_embedding_model()方法，确保维度一致
+                embeddings = get_embedding_model()
+                embedding = embeddings.get_embedding(text)
+                logger.info("使用默认嵌入模型生成向量")
             return embedding
         except Exception as e:
             logger.error(f"获取embedding失败: {str(e)}")
             raise
     
-    def search(self, query: Union[str, Dict[str, Any]], top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
+    def search(self, query: Union[str, Dict[str, Any]], top_k: int = 10, 
+               db_conn=None, embedding_model=None, **kwargs) -> List[Dict[str, Any]]:
         """
         执行dense向量搜索
         Args:
             query: 查询（字符串或结构化查询对象）
             top_k: 返回结果数量
+            db_conn: 数据库连接实例（必需）
+            embedding_model: 嵌入模型实例
             **kwargs: 其他参数（如filter等）
         Returns:
             搜索结果列表
@@ -64,38 +73,45 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
             if not query_text.strip():
                 logger.warning("查询文本为空")
                 return []
-            # 获取查询向量
-            query_embedding = self.get_embedding(query_text)
             
-            # 构建搜索参数
-            search_params = {
-                "vector": query_embedding,
-                "top_k": top_k,
-                "include_metadata": True
-            }
-            # 添加filter参数（如果提供）
-            if 'filter' in kwargs:
-                search_params['filter'] = kwargs['filter']
-            
-            # 执行搜索
-            try:
-                pinecone_response = self.index.query(**search_params)
-                # Pinecone 新 SDK 返回 QueryResponse 对象，需用属性访问
-                if hasattr(pinecone_response, "matches"):
-                    candidates = pinecone_response.matches
-                else:
-                    logger.error("Pinecone返回对象无matches属性")
-                    candidates = []
-            except Exception as e:
-                logger.info(f"Pinecone index.query 调用异常: {str(e)}")
+            # 验证必需参数
+            if not db_conn:
+                logger.error("必须提供数据库连接实例")
                 return []
-            # 执行rerank，修正参数顺序
-            rerank_results = self.rerank(query_text, candidates, RERANK_TOPK, model=RERANK_MODEL)
-            results = self.composite(rerank_results, query_text, 'dense')
             
-            logger.info(f"Dense搜索完成，查询: {query_text[:50]}...，返回 {len(results)} 个结果")
-            return results
+            # 使用传入的实例对象，如果没有则使用默认配置
+            if embedding_model:
+                self.embedding_model = embedding_model
+                logger.info("使用传入的嵌入模型实例")
             
+            logger.info("使用传入的数据库连接实例")
+            
+            # 调用数据库连接的 dense_search 方法
+            if hasattr(db_conn, 'dense_search'):
+                # 构建搜索参数
+                filter_param = kwargs.get('filter', {})
+                
+                # 调用 OpenSearch 的 dense_search
+                opensearch_results = db_conn.dense_search(
+                    query=query_text,
+                    filter=filter_param,
+                    embedding_model=embedding_model,
+                    top_k=top_k
+                )
+                
+                # 格式转换：OpenSearch → Pinecone
+                formatted_results = self.format_result(opensearch_results)
+                
+                # 继续使用现有的 rerank 和 composite 逻辑
+                rerank_results = db_conn.rerank(query_text, formatted_results, RERANK_TOPK, model=ALIYUN_RERANK_MODEL)
+                results = self.composite(rerank_results, query_text, 'dense')
+                
+                logger.info(f"Dense搜索完成，查询: {query_text[:50]}...，返回 {len(results)} 个结果")
+                return results
+            else:
+                logger.error("传入的数据库连接不支持 dense_search 方法")
+                return []
+                
         except Exception as e:
             logger.error(f"Dense搜索失败: {str(e)}")
             return []
@@ -112,5 +128,40 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
             "supports_filtering": True,
             "supports_hybrid": False,
             "embedding_model": EMBADDING_MODEL,
-            "index_name": self.index_name
+            "index_name": "dynamic"  # 动态数据库连接，不固定索引名
         } 
+
+    def format_result(self, opensearch_results: dict) -> list:
+        """
+        将 OpenSearch 返回结果格式化为标准搜索结果格式
+        
+        Args:
+            opensearch_results: OpenSearch 返回的原始响应结构，包含total和hits
+            
+        Returns:
+            list: 标准格式的搜索结果列表
+        """
+        formatted_results = []
+        
+        # 从原始响应中提取hits列表
+        hits = opensearch_results.get('hits', [])
+        
+        for hit in hits:
+            # 创建标准格式的搜索结果
+            formatted_result = {
+                'id': hit['_id'],
+                'score': hit['_score'],
+                'text': hit['_source']['text'],
+                'faction': hit['_source'].get('faction', ''),
+                'content_type': hit['_source'].get('content_type', ''),
+                'section_heading': hit['_source'].get('section_heading', ''),
+                'h1': hit['_source'].get('h1', ''),
+                'h2': hit['_source'].get('h2', ''),
+                'h3': hit['_source'].get('h3', ''),
+                'source_file': hit['_source'].get('source_file', ''),
+                'chunk_index': hit['_source'].get('chunk_index', 0),
+                'created_at': hit['_source'].get('created_at', '')
+            }
+            formatted_results.append(formatted_result)
+        
+        return formatted_results 

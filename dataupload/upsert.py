@@ -8,7 +8,7 @@ import glob
 from datetime import datetime
 from dataupload.bm25_manager import BM25Manager
 from dataupload.bm25_config import BM25Config
-from dataupload.vector_builder import build_vector_data, batch_upsert_vectors
+from dataupload.vector_builder import build_vector_data, build_vector_via_db, batch_upsert_vectors
 
 # 将项目根目录添加到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,10 +16,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dataupload.data_vector_v3 import SemanticDocumentChunker, save_chunks_to_text, save_chunks_to_json
 
 from dataupload.knowledge_graph_manager import KnowledgeGraphManager
-from config import get_embedding_model,get_qwen_embedding_model
 from storage.storage_factory import StorageFactory
 from conn.conn_factory import ConnectionFactory
 from embedding.em_factory import EmbeddingFactory
+
+from config import OPENSEARCH_INDEX
 
 
 # 导入config中的日志配置函数
@@ -268,30 +269,43 @@ class UpsertManager:
                 chunk_id_mapping = {}
                 
                 for i, chunk in enumerate(chunks):
-                    chunk_id = f"{os.path.basename(file_path)}-{i}"
+                    # 使用faction作为ID前缀，格式：faction_number
+                    faction = base_metadata.get('faction', 'unknown')
+                    chunk_id = f"{faction}_{i}"
                     chunk_id_mapping[i] = chunk_id
                     try:
                         embedding = self.embedding_model.get_embedding(chunk['text'])
                         logging.info(f"[embedding] {chunk_id}的embedding向量生成完毕.")
-                        # 用build_vector_data统一构造vector
-                        vector_data = build_vector_data(
+                        # 用build_vector_via_db根据数据库类型构造vector
+                        vector_data = build_vector_via_db(
                             chunk=chunk,
                             embedding=embedding,
                             bm25_manager=self.bm25_manager,  # 使用实例变量
                             chunk_id=chunk_id,
-                            base_metadata=base_metadata
+                            base_metadata=base_metadata,
+                            db_str=db_type  # 传递数据库类型
                         )
                         logging.info("[vector_Data] vector_data创建完毕")
                         vectors_to_upsert.append(vector_data)
                         # 先标记为pending，等批量上传完成后再更新状态
+                        # 从vector_data中提取需要的元数据字段
+                        chunk_metadata = {
+                            'chunk_id': chunk_id,
+                            'chunk_type': vector_data.get('chunk_type', ''),
+                            'content_type': vector_data.get('content_type', ''),
+                            'faction': vector_data.get('faction', ''),
+                            'section_heading': vector_data.get('section_heading', ''),
+                            'source_file': vector_data.get('source_file', ''),
+                            'chunk_index': vector_data.get('chunk_index', 0)
+                        }
                         upload_records.append({
                             'chunk_id': chunk_id,
                             'status': 'pending',
-                            'metadata': vector_data['metadata']
+                            'metadata': chunk_metadata
                         })
                         
                         # 记录稀疏向量生成情况
-                        if 'sparse_values' in vector_data:
+                        if 'sparse' in vector_data and vector_data['sparse']:
                             logging.info(f"[SPARSE_STATS] {chunk_id} - 稀疏向量生成成功")
                         else:
                             logging.warning(f"[SPARSE_STATS] {chunk_id} - 稀疏向量生成失败或为空")
@@ -305,7 +319,7 @@ class UpsertManager:
 
                 # 执行批量上传
                 try:
-                    batch_results = batch_upsert_vectors(self.db_conn, vectors_to_upsert, batch_size=100)
+                    batch_results = batch_upsert_vectors(self.db_conn, vectors_to_upsert, batch_size=100, index_name=OPENSEARCH_INDEX)
                     logging.info(f"[DEBUG] batch_results: {batch_results}")
                     logging.info(f"[DEBUG] batch_results类型: {type(batch_results)}")
                     logging.info(f"[DEBUG] batch_results长度: {len(batch_results)}")
@@ -349,7 +363,7 @@ class UpsertManager:
                 successful_uploads = sum(1 for record in upload_records if record['status'] == 'success')
                 failed_uploads = sum(1 for record in upload_records if record['status'] == 'fail')
                 # 统计稀疏向量生成情况
-                sparse_vectors_count = sum(1 for vector in vectors_to_upsert if 'sparse_values' in vector)
+                sparse_vectors_count = sum(1 for vector in vectors_to_upsert if 'sparse' in vector and vector['sparse'])
                 dense_only_count = len(vectors_to_upsert) - sparse_vectors_count
                 
                 logging.info(f"✅ Pinecone 向量上传完成:")

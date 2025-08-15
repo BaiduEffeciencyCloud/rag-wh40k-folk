@@ -8,30 +8,18 @@ logger = logging.getLogger(__name__)
 
 
 class BaseSearchEngine:
-    """搜索引擎基类，负责pinecone和openai初始化"""
-    def __init__(self, pinecone_api_key: str = None, index_name: str = None, openai_api_key: str = None, pinecone_environment: str = None):
-        self.pinecone_api_key = pinecone_api_key or os.getenv('PINECONE_API_KEY')
-        self.index_name = index_name or os.getenv('PINECONE_INDEX')
-        self.openai_api_key = openai_api_key or os.getenv('OPENAI_API_KEY')
-        self.pinecone_environment = pinecone_environment or os.getenv('PINECONE_ENVIRONMENT', 'gcp-starter')
-
-        # 初始化openai
-        self.client = OpenAI(api_key=self.openai_api_key)
-        # 新版pinecone初始化
-        self.pc = pinecone.Pinecone(api_key=self.pinecone_api_key)
-        self.index = self.pc.Index(self.index_name)
-
-        logging.getLogger(__name__).info(
-            f"[BaseSearchEngine] pinecone初始化完成，索引: {self.index_name}, 环境: {self.pinecone_environment}") 
+    """搜索引擎基类"""
+    def __init__(self):
+        pass
         
     def composite(self, rerank_results:any, query_text:str, search_engine:str):
         """
-        将 Pinecone rerank API 返回的结果对象（RerankResult）
-        统一转换为标准化的检索结果列表，便于后续展示、评估和下游处理。
+        将 rerank API 返回的结果统一转换为标准化的检索结果列表，便于后续展示、评估和下游处理。
 
         参数说明
         rerank_results (any):
-        Pinecone rerank API 的返回对象，需包含 .data 属性。每个元素为 dict，结构包括 index（原始文档下标）、score（相关性分数）、document（dict，含 text 字段）。
+        rerank API 的返回结果，可能是包含 .data 属性的对象，也可能是直接的列表。
+        每个元素为 dict，结构包括 index（原始文档下标）、score（相关性分数）、document（dict，含 text 字段）。
         query_text (str):原始查询文本，用于结果溯源和展示。
         search_engine (str):检索引擎类型标识（如 'dense'），用于结果标记。
         
@@ -45,7 +33,16 @@ class BaseSearchEngine:
             query: 原始查询文本
         """
         results = []
-        for data in rerank_results.data:
+        
+        # 兼容两种格式：直接列表或包含.data属性的对象
+        if hasattr(rerank_results, 'data'):
+            # Pinecone 格式：rerank_results.data
+            data_list = rerank_results.data
+        else:
+            # 直接列表格式：rerank_results 本身就是列表
+            data_list = rerank_results
+        
+        for data in data_list:
             text = data["document"]["text"]
             if not text or len(text.strip()) < 10:
                 continue
@@ -58,8 +55,8 @@ class BaseSearchEngine:
             }
             results.append(result)
         return results
-    
-    def rerank(self, query: str, candidates: List[Dict], top_k: int = 5, model: str = RERANK_MODEL, **kwargs) -> List[Dict]:
+
+    def pineconeRerank(self, query: str, candidates: List[Dict], top_k: int = 5, model: str = RERANK_MODEL, **kwargs) -> List[Dict]:
         # 1. 提取所有 text（兼容 Pinecone 返回结构）
         text2item = {item['metadata']['text']: item for item in candidates if 'metadata' in item and 'text' in item['metadata']}
         documents = list(text2item.keys())

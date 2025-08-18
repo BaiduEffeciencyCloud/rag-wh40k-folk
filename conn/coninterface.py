@@ -6,7 +6,18 @@ class ConnectionInterface(ABC):
     def dense_search(self, query: str,filter:dict,embedding_model:None,top_k:int=20) -> list:
         pass
     @abstractmethod
-    def hybrid_search(self, query: str,filter:dict,top_k:int=20) ->list:
+    def hybrid_search(self, query: str, filter: dict = None, top_k: int = 20, **kwargs) -> list:
+        """
+        统一的混合搜索接口
+        
+        Args:
+            query: 查询文本
+            filter: 过滤条件
+            top_k: 返回结果数量
+            **kwargs: 其他参数
+                - 对于 pipeline: query_vector, bm25_weight, vector_weight
+                - 对于 rrf: sparse_vector, dense_vector, rrf_params
+        """
         pass
     @abstractmethod
     def adaptive_data(self, chunk: dict, chunk_id: str, bm25_manager, pre_generated_embedding: list = None) -> dict:

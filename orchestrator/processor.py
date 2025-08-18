@@ -51,10 +51,10 @@ class RAGOrchestrator:
         logger.info("="*60)
          
         # 2. 实例化数据库连接和嵌入模型
-        db_conn = None
+        db_conn_instance = None
         if db_type:
             try:
-                db_conn = ConnectionFactory.create_conn(db_type)
+                db_conn_instance = ConnectionFactory.create_conn(db_type)
                 logger.info(f"成功创建数据库连接: {db_type}")
             except Exception as e:
                 logger.error(f"创建数据库连接失败: {str(e)}")
@@ -71,7 +71,7 @@ class RAGOrchestrator:
         
         # 3. 检索召回
         results = self.se.search(processed, top_k=top_k, 
-                               db_conn=db_conn, 
+                               db_conn=db_conn_instance, 
                                embedding_model=embedding_instance,
                                rerank=rerank,
                                **kwargs)
@@ -90,10 +90,8 @@ class RAGOrchestrator:
         # 5. 聚合
         logger.info("开始进行聚合处理:")
         logger.info(f"聚合前，结果数量: {len(results) if results else 0}")
-        if results and len(results) > 0:
-            logger.info(f"聚合前，第一个结果: {results[0]}")
         result = self.agg.aggregate(results, query, params=kwargs)
-        logger.info(f"聚合后，结果: {result}")
+        logger.info(f"聚合后，结果: {len(result)}")
 
         logger.info("流程结束")
         logger.info("✅ 全流程执行完毕")

@@ -5,12 +5,7 @@ from ..interfaces import PostSearchInterface
 import logging
 from engineconfig.post_search_config import get_processor_config
 
-try:
-    from config import get_embedding_model
-    EMBEDDING_AVAILABLE = True
-except ImportError:
-    EMBEDDING_AVAILABLE = False
-    get_embedding_model = None
+
 
 logger = logging.getLogger(__name__)
 

@@ -366,7 +366,7 @@ class UpsertManager:
                 sparse_vectors_count = sum(1 for vector in vectors_to_upsert if 'sparse' in vector and vector['sparse'])
                 dense_only_count = len(vectors_to_upsert) - sparse_vectors_count
                 
-                logging.info(f"✅ Pinecone 向量上传完成:")
+                logging.info(f"✅ 向量上传完成:")
                 logging.info(f"  - 总切片数: {len(chunks)}")
                 logging.info(f"  - 成功上传: {successful_uploads}")
                 logging.info(f"  - 上传失败: {failed_uploads}")

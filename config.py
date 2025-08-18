@@ -77,91 +77,106 @@ if not all([NEO4J_TEST_URI, NEO4J_TEST_USERNAME, NEO4J_TEST_PASSWORD]):
     logger.warning("Neo4j test configuration incomplete. Please set NEO4J_TEST_URI, NEO4J_TEST_USERNAME, and NEO4J_TEST_PASSWORD in .env file")
 
 # 模型配置
-DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_TEMPERATURE", "0.3"))
-DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", "15"))
+DEFAULT_TEMPERATURE = 0.3  # 默认温度参数，控制生成文本的随机性
+DEFAULT_TOP_K = 15  # 默认返回结果数量
 
 # query超时配置
-QUERY_TIMEOUT = int(os.getenv("QUERY_TIMEOUT", "30"))  # 查询超时时间（秒）
+QUERY_TIMEOUT = 30  # 查询超时时间（秒）
 
 # 答案生成配置
-ANSWER_GENERATION_TEMPERATURE = float(os.getenv("ANSWER_GENERATION_TEMPERATURE", "0.3"))  # 答案生成温度
-ANSWER_MAX_TOKENS = int(os.getenv("ANSWER_MAX_TOKENS", "2000"))  # 答案生成最大token数
+ANSWER_GENERATION_TEMPERATURE = 0.3  # 答案生成温度，控制创造性
+ANSWER_MAX_TOKENS = 2000  # 答案生成最大token数
 
 # 结果整合配置
-DEDUPLICATION_THRESHOLD = float(os.getenv("DEDUPLICATION_THRESHOLD", "0.8"))  # 去重阈值
+DEDUPLICATION_THRESHOLD = 0.8  # 去重阈值，相似度超过此值视为重复
 
 # 并发配置
-DEFAULT_MAX_WORKERS = int(os.getenv("DEFAULT_MAX_WORKERS", "4"))  # 默认最大并发工作线程数
+DEFAULT_MAX_WORKERS = 4  # 默认最大并发工作线程数
 
 # 答案生成配置
-MAX_CONTEXT_RESULTS = int(os.getenv("MAX_CONTEXT_RESULTS", "20"))  # 答案生成时使用的最大上下文结果数
+MAX_CONTEXT_RESULTS = 20  # 答案生成时使用的最大上下文结果数
+
+
 
 # ========== 网络连接配置 ==========
 # Embedding模型专用配置
-EMBEDDING_CONNECT_TIMEOUT = int(os.getenv("EMBEDDING_CONNECT_TIMEOUT", "60"))  # Embedding连接超时
-EMBEDDING_READ_TIMEOUT = int(os.getenv("EMBEDDING_READ_TIMEOUT", "120"))      # Embedding读取超时
-EMBEDDING_MAX_RETRIES = int(os.getenv("EMBEDDING_MAX_RETRIES", "3"))         # Embedding重试次数
-EMBEDDING_RETRY_DELAY = float(os.getenv("EMBEDDING_RETRY_DELAY", "2.0"))     # Embedding重试延迟
+EMBEDDING_CONNECT_TIMEOUT = 60  # Embedding连接超时（秒）
+EMBEDDING_READ_TIMEOUT = 120  # Embedding读取超时（秒）
+EMBEDDING_MAX_RETRIES = 3  # Embedding重试次数
+EMBEDDING_RETRY_DELAY = 2.0  # Embedding重试延迟（秒）
 
 # 指数退避配置
-EMBEDDING_USE_EXPONENTIAL_BACKOFF = os.getenv("EMBEDDING_USE_EXPONENTIAL_BACKOFF", "true").lower() == "true"
-EMBEDDING_BACKOFF_FACTOR = float(os.getenv("EMBEDDING_BACKOFF_FACTOR", "2.0"))
-EMBEDDING_MAX_BACKOFF_DELAY = float(os.getenv("EMBEDDING_MAX_BACKOFF_DELAY", "30.0"))
+EMBEDDING_USE_EXPONENTIAL_BACKOFF = True  # 是否使用指数退避策略
+EMBEDDING_BACKOFF_FACTOR = 2.0  # 退避因子
+EMBEDDING_MAX_BACKOFF_DELAY = 30.0  # 最大退避延迟（秒）
 
 
 
 # OPEN AI LLM模型
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
-LLM_IMAGE_MODEL=os.getenv("LLM_IMAGE_MODEL", "gpt-4o")
+LLM_MODEL = "gpt-4o"  # OpenAI LLM模型名称
+LLM_IMAGE_MODEL = "gpt-4o"  # OpenAI图像模型名称
 # 嵌入模型
-EMBADDING_MODEL = os.getenv("EMBADDING_MODEL", "text-embedding-3-large")
-OPENAI_DIMENSION = 2048
+EMBADDING_MODEL = "text-embedding-3-large"  # OpenAI嵌入模型名称
+OPENAI_DIMENSION = 2048  # OpenAI嵌入向量维度
 
 # QWEN AI LLM 模型
-EMBEDDING_MODEL_QWEN = os.getenv("EMBEDDING_MODEL_QWEN", "text-embedding-v4")
-RERANK_MODEL_QWEN = os.getenv("RERANK_MODEL_QWEN", "text-embedding-v4")
-QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")
-QWEN_DIMENSION = 2048
+EMBEDDING_MODEL_QWEN = "text-embedding-v4"  # QWEN嵌入模型名称
+RERANK_MODEL_QWEN = "text-embedding-v4"  # QWEN重排序模型名称
+QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")  # QWEN API密钥（保留环境变量）
+QWEN_DIMENSION = 2048  # QWEN嵌入向量维度
 
 # Hybrid检索配置
 #当 α = 0 时，完全依赖稀疏检索（纯 BM25/TF-IDF）；
 #当 α = 1 时，完全依赖密集检索（纯语义向量匹配）；
 HYBRID_ALPHA = 0.3
+# 混合搜索算法选择
+# 可选值: 'pipeline' (默认) 或 'rrf'
+HYBRID_ALGORITHM = 'rrf'
+# ========== RRF混合搜索配置 ==========
+# RRF (Reciprocal Rank Fusion) 算法参数配置
+RRF_RANK_CONSTANT = 8  # RRF排名常数，越小区分度越高，建议5-15
+RRF_WINDOW_MULTIPLIER = 5  # RRF窗口大小倍数，越大捕获文档越多，建议3-5
+
+# ========== Pipeline混合搜索配置 ==========
+# Pipeline混合搜索算法参数配置
+PIPELINE_NORMALIZATION_TECHNIQUE = "min_max"  # 归一化技术：min_max, z_score, decimal_scaling, log_scale
+PIPELINE_COMBINATION_TECHNIQUE = "arithmetic_mean"  # 组合技术：arithmetic_mean, geometric_mean, harmonic_mean, weighted_sum
+PIPELINE_BM25_BOOST = 1.0  # BM25搜索boost值，影响BM25结果权重
+PIPELINE_VECTOR_BOOST = 1.0  # 向量搜索boost值，影响向量搜索结果权重
 
 # rerank 模型
-RERANK_MODEL = os.getenv("RERANK_MODEL", "bge-reranker-v2-m3")
-ALIYUN_RERANK_MODEL = os.getenv("ALIYUN_RERANK_MODEL", "gte-rerank-v2")
-RERANK_TOPK = 20
+RERANK_MODEL = "bge-reranker-v2-m3"  # 默认重排序模型
+ALIYUN_RERANK_MODEL = "gte-rerank-v2"  # 阿里云重排序模型
+RERANK_TOPK = 20  # 重排序返回结果数量
 
 # BM25相关配置
-BM25_K1 = float(os.getenv('BM25_K1', '1.5'))
-BM25_B = float(os.getenv('BM25_B', '0.75'))
-BM25_MIN_FREQ = int(os.getenv('BM25_MIN_FREQ', '3'))
-BM25_MAX_VOCAB_SIZE = int(os.getenv('BM25_MAX_VOCAB_SIZE', '4000'))
-BM25_CUSTOM_DICT_PATH = os.getenv('BM25_CUSTOM_DICT_PATH', 'dicts/warhammer40k.txt')
-BM25_MODEL_PATH = os.getenv('BM25_MODEL_PATH', 'models/bm25_model.pkl')
-BM25_VOCAB_PATH = os.getenv('BM25_VOCAB_PATH', 'dict/')
+BM25_K1 = 1.5  # BM25算法k1参数，控制词频饱和速度
+BM25_B = 0.75  # BM25算法b参数，控制文档长度归一化程度
+BM25_MIN_FREQ = 3  # 最小词频，低于此值的词会被过滤
+BM25_MAX_VOCAB_SIZE = 4000  # 最大词汇表大小
+BM25_CUSTOM_DICT_PATH = 'dicts/warhammer40k.txt'  # 自定义词典路径
+BM25_MODEL_PATH = 'models/bm25_model.pkl'  # BM25模型文件路径
+BM25_VOCAB_PATH = 'dict/'  # 词汇表文件目录
 
 # BM25文件路径配置
-BM25_MODEL_DIR = os.getenv('BM25_MODEL_DIR', 'models')
-BM25_VOCAB_DIR = os.getenv('BM25_VOCAB_DIR', 'dict')
-BM25_MODEL_FILENAME = os.getenv('BM25_MODEL_FILENAME', 'bm25_model.pkl')
-BM25_VOCAB_FILENAME_PATTERN = os.getenv('BM25_VOCAB_FILENAME_PATTERN', 'bm25_vocab_{timestamp}.json')
+BM25_MODEL_DIR = 'models'  # 模型文件目录
+BM25_VOCAB_DIR = 'dict'  # 词汇表文件目录
+BM25_MODEL_FILENAME = 'bm25_model.pkl'  # 模型文件名
+BM25_VOCAB_FILENAME_PATTERN = 'bm25_vocab_{timestamp}.json'  # 词汇表文件名模式
 
 # BM25训练配置
-BM25_ENABLE_INCREMENTAL = os.getenv('BM25_ENABLE_INCREMENTAL', 'true').lower() == 'true'
-BM25_SAVE_AFTER_UPDATE = os.getenv('BM25_SAVE_AFTER_UPDATE', 'true').lower() == 'true'
+BM25_ENABLE_INCREMENTAL = True  # 是否启用增量训练
+BM25_SAVE_AFTER_UPDATE = True  # 更新后是否保存模型
 
 # BM25性能配置
-BM25_BATCH_SIZE = int(os.getenv('BM25_BATCH_SIZE', '1000'))
-BM25_CACHE_SIZE = int(os.getenv('BM25_CACHE_SIZE', '1000'))
+BM25_BATCH_SIZE = 1000  # 批处理大小
+BM25_CACHE_SIZE = 1000  # 缓存大小
 
 
 
 # Pinecone稀疏向量限制
-PINECONE_MAX_SPARSE_VALUES = int(os.getenv('PINECONE_MAX_SPARSE_VALUES', '2048'))  # Pinecone单个稀疏向量的最大非零元素数量
-
-PINECONE_SPARSE_DIMENSION = int(os.getenv('PINECONE_SPARSE_DIMENSION', '10000'))
+PINECONE_MAX_SPARSE_VALUES = 2048  # Pinecone单个稀疏向量的最大非零元素数量
+PINECONE_SPARSE_DIMENSION = 10000  # Pinecone稀疏向量维度
 
 phrase_weight_scorer = PhraseWeightScorer(
     df_thresholds=(1, 2, 3),
@@ -191,25 +206,6 @@ def get_embedding_model():
     except Exception as e:
         logger.warning(f"[DEBUG] embedding shape 获取失败: {e}")
     return embeddings
-
-def get_qwen_embedding_model():
-    """
-    初始化并返回QWEN嵌入模型对象。
-    使用dashscope的TextEmbedding类方法调用。
-    """
-    # 导入dashscope并设置全局API key
-    import dashscope
-    from dashscope.embeddings import TextEmbedding
-    if not QWEN_API_KEY:
-        logger.error("QWEN API key not configured.")
-        raise ValueError("QWEN API key is missing.")
-
-    dashscope.api_key = QWEN_API_KEY
-    
-    # 记录初始化信息
-    logger.info(f"QWEN embedding model '{EMBEDDING_MODEL_QWEN}' initialized with API key.")
-    
-    return TextEmbedding
 
 # 日志配置
 LOG_FORMAT = os.getenv("LOG_FORMAT", '%(asctime)s - %(levelname)s - %(message)s')

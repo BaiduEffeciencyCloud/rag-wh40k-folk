@@ -3,7 +3,6 @@ import sys
 from typing import Dict, Any, List, Union
 from openai import OpenAI
 import logging
-from config import get_embedding_model
 from config import RERANK_MODEL
 from pinecone import Pinecone
 
@@ -33,15 +32,12 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
             向量表示
         """
         try:
-            # 优先使用传入的嵌入模型实例
-            if hasattr(self, 'embedding_model') and self.embedding_model:
-                embedding = self.embedding_model.get_embedding(text)
-                logger.info("使用传入的嵌入模型实例生成向量")
-            else:
-                # 使用config中的get_embedding_model()方法，确保维度一致
-                embeddings = get_embedding_model()
-                embedding = embeddings.get_embedding(text)
-                logger.info("使用默认嵌入模型生成向量")
+            # 必须提供嵌入模型实例
+            if not hasattr(self, 'embedding_model') or not self.embedding_model:
+                raise ValueError("必须提供嵌入模型实例，无法使用默认配置")
+            
+            embedding = self.embedding_model.get_embedding(text)
+            logger.info("使用传入的嵌入模型实例生成向量")
             return embedding
         except Exception as e:
             logger.error(f"获取embedding失败: {str(e)}")

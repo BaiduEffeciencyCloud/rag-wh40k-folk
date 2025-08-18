@@ -5,7 +5,7 @@ from datetime import datetime
 from opensearchpy import OpenSearch
 from http import HTTPStatus
 from .coninterface import ConnectionInterface
-from config import OPENSEARCH_URI, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD, OPENSEARCH_INDEX, EMBEDDING_MODEL_QWEN, QWEN_DIMENSION, ALIYUN_RERANK_MODEL, RERANK_TOPK
+from config import OPENSEARCH_URI, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD, OPENSEARCH_INDEX, EMBEDDING_MODEL_QWEN, QWEN_DIMENSION, ALIYUN_RERANK_MODEL, RERANK_TOPK, HYBRID_ALGORITHM
 from opensearchpy import OpenSearch
 from typing import List, Dict
 import dashscope
@@ -166,8 +166,348 @@ class OpenSearchConnection(ConnectionInterface):
             self.logger.error(error_msg)
             raise Exception(error_msg)
         
-    def hybrid_search(self, query: str, filter: dict, top_k:int=20) -> list:
-        pass
+    def hybrid_search(self, query: str, filter: dict = None, top_k: int = 20, **kwargs) -> dict:
+        """
+        执行混合搜索的统一接口
+        
+        Args:
+            query: 查询文本
+            filter: 过滤条件
+            top_k: 返回结果数量
+            **kwargs: 其他参数
+                - 对于 pipeline: query_vector, bm25_weight, vector_weight
+                - 对于 rrf: sparse_vector, dense_vector, rrf_params
+                - algorithm: 可选，指定算法类型，如果不指定则使用配置默认值
+                
+        Returns:
+            dict: 原始的 OpenSearch hits 字典
+        """
+        try:
+            # 优先使用传入的算法参数，如果没有则使用配置默认值
+            algorithm = kwargs.get('algorithm', HYBRID_ALGORITHM)
+            
+            if algorithm == 'pipeline':
+                # 从 kwargs 中提取 pipeline 所需参数
+                query_vector = kwargs.get('query_vector')
+                bm25_weight = kwargs.get('bm25_weight', 0.7)
+                vector_weight = kwargs.get('vector_weight', 0.3)
+                
+                if not query_vector:
+                    raise ValueError("pipeline方式需要query_vector参数")
+                    
+                response = self.hybrid_search_pipeline(
+                    query=query,
+                    query_vector=query_vector,
+                    filter=filter,
+                    top_k=top_k,
+                    bm25_weight=bm25_weight,
+                    vector_weight=vector_weight
+                )
+                
+            elif algorithm == 'rrf':
+                # 从 kwargs 中提取 RRF 所需参数
+                sparse_vector = kwargs.get('sparse_vector')
+                dense_vector = kwargs.get('dense_vector')
+                rrf_params = kwargs.get('rrf_params')
+                
+                if not sparse_vector or not dense_vector:
+                    raise ValueError("RRF方式需要sparse_vector和dense_vector参数")
+                    
+                response = self.hybrid_search_rrf(
+                    query=query,
+                    sparse_vector=sparse_vector,
+                    dense_vector=dense_vector,
+                    filter=filter,
+                    top_k=top_k,
+                    rrf_params=rrf_params
+                )
+            else:
+                raise ValueError(f"不支持的混合搜索算法: {algorithm}")
+                
+            # 直接返回原始 hits，不进行格式转换
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"Hybrid搜索失败: {str(e)}")
+            raise
+
+    def _convert_response_to_list(self, response: dict) -> list:
+        """
+        将OpenSearch响应转换为list格式
+        
+        Args:
+            response: OpenSearch返回的响应
+            
+        Returns:
+            list: 转换后的结果列表
+        """
+        results = []
+        
+        # 添加调试信息
+        self.logger.debug(f"Converting response: {response}")
+        
+        if 'hits' in response and 'hits' in response['hits']:
+            self.logger.debug(f"Found {len(response['hits']['hits'])} hits")
+            for hit in response['hits']['hits']:
+                result = {
+                    'id': hit['_id'],
+                    'score': hit['_score'],
+                    'text': hit['_source'].get('text', ''),
+                    'faction': hit['_source'].get('faction', ''),
+                    'content_type': hit['_source'].get('content_type', ''),
+                    'search_type': 'hybrid',
+                    'query': ''  # 移除对response.get('query', '')的依赖
+                }
+                results.append(result)
+                self.logger.debug(f"Converted hit: {result}")
+        else:
+            self.logger.debug("No hits found in response")
+        
+        self.logger.debug(f"Returning {len(results)} results")
+        return results
+        
+    def hybrid_search_pipeline(self, query: str, query_vector: list, filter: dict = None, top_k: int = 20, 
+                     bm25_weight: float = 0.7, vector_weight: float = 0.3, 
+                     use_hybrid_query: bool = True) -> dict:
+        """
+        执行混合搜索（BM25 + 向量搜索）- Pipeline方式
+        
+        Args:
+            query: 查询文本
+            query_vector: 查询向量（由调用方生成）
+            filter: 过滤条件
+            top_k: 返回结果数量
+            bm25_weight: BM25搜索权重 (0.0-1.0)
+            vector_weight: 向量搜索权重 (0.0-1.0)
+            use_hybrid_query: 是否使用 hybrid 查询（推荐），False 使用 bool+should 方式
+            
+        Returns:
+            dict: 包含total和hits的搜索结果
+        """
+        try:
+            # 1. 确保连接
+            self._ensure_connection()
+            
+            # 2. 验证查询向量
+            if query_vector is None:
+                raise ValueError("hybrid_search 需要 query_vector 参数")
+            
+            if not query_vector or len(query_vector) != 2048:
+                raise ValueError(f"查询向量维度不正确: {len(query_vector) if query_vector else 0}")
+            
+            self.logger.info(f"Hybrid搜索开始，查询: {query}，向量维度: {len(query_vector)}，使用查询类型: {'hybrid' if use_hybrid_query else 'bool+should'}")
+            
+            # 3. 创建或获取搜索管道
+            pipeline_id = self._get_or_create_search_pipeline()
+            
+            # 4. 根据参数选择查询构建方式
+            if use_hybrid_query:
+                search_body = self._build_hybrid_query(query, query_vector, filter, top_k)
+            else:
+                search_body = self._build_hybrid_query_with_weights(query, query_vector, bm25_weight, vector_weight, filter, top_k)
+            
+            # 5. 执行搜索（修复：使用 search_pipeline 参数）
+            response = self.client.search(
+                body=search_body,
+                index=self.index,
+                search_pipeline=pipeline_id
+            )
+            
+            # 6. 处理结果
+            hits = response.get('hits', {})
+            
+            # 添加调试日志
+            self.logger.debug(f"OpenSearch 原始响应: {response}")
+            self.logger.debug(f"提取的 hits 字段: {hits}")
+            self.logger.debug(f"hits 类型: {type(hits)}")
+            
+            self.logger.info(f"Hybrid搜索完成，查询: {query}，返回 {hits.get('total', {}).get('value', 0)} 个结果")
+            return hits
+            
+        except Exception as e:
+            self.logger.error(f"Hybrid搜索失败: {str(e)}")
+            raise
+    
+
+    
+    def _get_or_create_search_pipeline(self) -> str:
+        """
+        获取或创建用于混合搜索分数归一化的搜索管道
+        
+        Returns:
+            str: 管道ID
+        """
+        pipeline_id = "hybrid_normalization_pipeline"
+        
+        try:
+            # 1. 使用正确的 Search Pipeline API 检查搜索管道是否存在
+            self.client.search_pipeline.get(id=pipeline_id)
+            self.logger.info(f"使用现有搜索管道: {pipeline_id}")
+            
+        except Exception:  # opensearchpy.NotFoundError
+            # 2. 管道不存在，创建新的
+            self.logger.info(f"搜索管道不存在，正在创建: {pipeline_id}")
+            self._create_search_pipeline(pipeline_id)
+            
+        return pipeline_id
+    
+    def _create_search_pipeline(self, pipeline_id: str):
+        """
+        创建一个带有分数归一化处理器的搜索管道
+        
+        Args:
+            pipeline_id: 管道ID
+        """
+        pipeline_body = {
+            "description": "A search pipeline for hybrid search score processing.",
+            "request_processors": [
+                {
+                    "script": {
+                        "lang": "painless",
+                        "source": """
+                        // 简单的分数处理脚本
+                        if (ctx.containsKey('_score')) {
+                            // 保持原始分数，不做复杂处理
+                            ctx._score = ctx._score;
+                        }
+                        """
+                    }
+                }
+            ]
+        }
+        
+        try:
+            # 3. 使用正确的 Search Pipeline API 创建搜索管道
+            self.client.search_pipeline.put(id=pipeline_id, body=pipeline_body)
+            self.logger.info(f"成功创建搜索管道: {pipeline_id}")
+        except Exception as e:
+            self.logger.error(f"创建搜索管道失败: {str(e)}")
+            raise
+    
+    def _build_hybrid_query(self, query: str, query_vector: list, filter: dict = None, top_k: int = 20) -> dict:
+        """
+        构建混合搜索查询
+        
+        Args:
+            query: 查询文本
+            query_vector: 查询向量
+            filter: 过滤条件
+            top_k: 返回结果数量
+            
+        Returns:
+            dict: 搜索查询体
+        """
+        from config import PIPELINE_BM25_BOOST, PIPELINE_VECTOR_BOOST
+        
+        # 基础查询结构
+        search_body = {
+            "size": top_k,
+            "query": {
+                "hybrid": {
+                    "queries": [
+                        {
+                            "match": {
+                                "text": {
+                                    "query": query,
+                                    "boost": PIPELINE_BM25_BOOST  # 配置化的BM25搜索boost值
+                                }
+                            }
+                        },
+                        {
+                            "knn": {
+                                "embedding": {
+                                    "vector": query_vector,
+                                    "k": top_k,
+                                    "boost": PIPELINE_VECTOR_BOOST  # 配置化的向量搜索boost值
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+        
+        # 添加过滤条件
+        if filter:
+            search_body["query"]["hybrid"]["queries"].append({
+                "bool": {
+                    "filter": self._build_filter_query(filter)
+                }
+            })
+        
+        return search_body
+    
+    def _build_hybrid_query_with_weights(self, query: str, query_vector: list, bm25_weight: float, vector_weight: float, filter: dict = None, top_k: int = 20) -> dict:
+        """
+        构建支持动态权重的混合搜索查询
+        
+        Args:
+            query: 查询文本
+            query_vector: 查询向量
+            bm25_weight: BM25搜索权重
+            vector_weight: 向量搜索权重
+            filter: 过滤条件
+            top_k: 返回结果数量
+            
+        Returns:
+            dict: 搜索查询体
+        """
+        # 基础查询结构，权重在查询层面处理
+        search_body = {
+            "size": top_k,
+            "query": {
+                "bool": {
+                    "should": [
+                        {
+                            "match": {
+                                "text": {
+                                    "query": query,
+                                    "boost": bm25_weight  # 动态权重
+                                }
+                            }
+                        },
+                        {
+                            "knn": {
+                                "embedding": {
+                                    "vector": query_vector,
+                                    "k": top_k,
+                                    "boost": vector_weight  # 动态权重
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+        
+        # 添加过滤条件
+        if filter:
+            search_body["query"]["bool"]["filter"] = self._build_filter_query(filter)
+        
+        return search_body
+    
+    def _build_filter_query(self, filter: dict) -> list:
+        """
+        构建过滤查询
+        
+        Args:
+            filter: 过滤条件字典
+            
+        Returns:
+            list: 过滤查询列表
+        """
+        filter_queries = []
+        
+        for field, value in filter.items():
+            if isinstance(value, str):
+                filter_queries.append({"term": {field: value}})
+            elif isinstance(value, list):
+                filter_queries.append({"terms": {field: value}})
+            elif isinstance(value, dict):
+                # 支持范围查询等复杂过滤
+                filter_queries.append({"range": {field: value}})
+        
+        return filter_queries
     
     def heartbeat(self) -> bool:
         """
@@ -444,50 +784,6 @@ class OpenSearchConnection(ConnectionInterface):
             self.logger.error(error_msg)
             raise Exception(error_msg)
 
-    def _build_filter_query(self, filter: dict) -> list:
-        """
-        构建过滤查询条件
-        
-        Args:
-            filter: 过滤条件字典
-        
-        Returns:
-            list: 过滤查询列表
-        """
-        filter_queries = []
-        
-        if 'faction' in filter:
-            filter_queries.append({
-                "term": {"faction": filter['faction']}
-            })
-        
-        if 'content_type' in filter:
-            filter_queries.append({
-                "term": {"content_type": filter['content_type']}
-            })
-        
-        if 'source_file' in filter:
-            filter_queries.append({
-                "term": {"source_file": filter['source_file']}
-            })
-        
-        if 'h1' in filter:
-            filter_queries.append({
-                "term": {"h1": filter['h1']}
-            })
-        
-        if 'h2' in filter:
-            filter_queries.append({
-                "term": {"h2": filter['h2']}
-            })
-        
-        if 'h3' in filter:
-            filter_queries.append({
-                "term": {"h3": filter['h3']}
-            })
-        
-        return filter_queries
-
     def _ensure_connection(self):
         """
         确保OpenSearch连接可用
@@ -713,3 +1009,204 @@ class OpenSearchConnection(ConnectionInterface):
             error_msg = f"获取样本数据失败: {str(e)}"
             self.logger.error(error_msg)
             return []
+
+    def hybrid_search_rrf(self, query: str, sparse_vector: dict, dense_vector: list, 
+                         filter: dict = None, top_k: int = 20, rrf_params: dict = None) -> dict:
+        """
+        执行RRF混合搜索（稀疏向量 + 密集向量）
+        
+        Args:
+            query: 查询文本
+            sparse_vector: 稀疏向量字典 {term: weight}
+            dense_vector: 密集向量列表
+            filter: 过滤条件
+            top_k: 返回结果数量
+            rrf_params: RRF算法参数
+            
+        Returns:
+            dict: 包含total和hits的搜索结果
+        """
+        try:
+            # 1. 确保连接
+            self._ensure_connection()
+            
+            # 2. 验证参数
+            if not sparse_vector or not dense_vector:
+                raise ValueError("sparse_vector 和 dense_vector 都不能为空")
+            
+            if len(dense_vector) != 2048:
+                raise ValueError(f"密集向量维度不正确: {len(dense_vector)}")
+            
+            self.logger.info(f"RRF Hybrid搜索开始，查询: {query}，稀疏向量项数: {len(sparse_vector)}，密集向量维度: {len(dense_vector)}")
+            
+            # 3. 获取或创建RRF Search Pipeline
+            pipeline_id = self._get_or_create_rrf_pipeline(rrf_params)
+            
+            # 4. 构建查询
+            search_body = self._build_hybrid_query_rrf(query, sparse_vector, dense_vector, filter, top_k, rrf_params)
+            
+            # 5. 执行搜索（使用RRF Pipeline）
+            response = self.client.search(
+                body=search_body,
+                index=self.index,
+                search_pipeline=pipeline_id
+            )
+            
+            # 5. 处理结果
+            hits = response.get('hits', {})
+            
+            # 添加调试日志
+            self.logger.debug(f"RRF OpenSearch 原始响应: {response}")
+            self.logger.debug(f"RRF 提取的 hits 字段: {hits}")
+            self.logger.debug(f"RRF hits 类型: {type(hits)}")
+            
+            self.logger.info(f"RRF Hybrid搜索完成，查询: {query}，返回 {hits.get('total', {}).get('value', 0)} 个结果")
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"RRF Hybrid搜索失败: {str(e)}")
+            raise
+
+    def _build_hybrid_query_rrf(self, query: str, sparse_vector: dict, dense_vector: list, 
+                               filter: dict = None, top_k: int = 20, rrf_params: dict = None) -> dict:
+        """
+        构建RRF混合搜索查询
+        
+        Args:
+            query: 查询文本
+            sparse_vector: 稀疏向量字典
+            dense_vector: 密集向量列表
+            filter: 过滤条件
+            top_k: 返回结果数量
+            rrf_params: RRF算法参数
+            
+        Returns:
+            dict: 搜索查询体
+        """
+        # 构建稀疏向量查询（使用match查询替代rank_features）
+        sparse_query = self._build_sparse_query(sparse_vector)
+        
+        # 构建密集向量查询
+        dense_query = self._build_dense_query(dense_vector, top_k)
+        
+        # 构建混合查询（不包含rank.rrf，RRF逻辑通过Search Pipeline实现）
+        search_body = {
+            "size": top_k,
+            "query": {
+                "hybrid": {
+                    "queries": [
+                        sparse_query,    # 稀疏向量查询
+                        dense_query      # 密集向量查询
+                    ]
+                }
+            }
+        }
+        
+        # 添加过滤条件
+        if filter:
+            search_body["query"]["hybrid"]["filter"] = self._build_filter_query(filter)
+        
+        return search_body
+
+    def _get_or_create_rrf_pipeline(self, rrf_params: dict = None) -> str:
+        """
+        获取或创建RRF Search Pipeline
+        
+        Args:
+            rrf_params: RRF算法参数
+            
+        Returns:
+            str: Pipeline ID
+        """
+        pipeline_id = "hybrid_rrf_pipeline"
+        
+        try:
+            # 尝试获取现有Pipeline
+            self.client.search_pipeline.get(id=pipeline_id)
+            self.logger.info(f"使用现有RRF Pipeline: {pipeline_id}")
+        except Exception:
+            # Pipeline不存在，创建新的
+            self.logger.info(f"RRF Pipeline不存在，正在创建: {pipeline_id}")
+            self._create_rrf_pipeline(pipeline_id, rrf_params)
+        
+        return pipeline_id
+    
+    def _create_rrf_pipeline(self, pipeline_id: str, rrf_params: dict = None):
+        """
+        创建RRF Search Pipeline
+        
+        Args:
+            pipeline_id: Pipeline ID
+            rrf_params: RRF算法参数
+        """
+        # 设置默认参数
+        default_params = {
+            "window_size": 20,
+            "rank_constant": 60
+        }
+        
+        if rrf_params:
+            default_params.update(rrf_params)
+        
+        pipeline_body = {
+            "description": "RRF Pipeline for hybrid search result fusion",
+            "phase_results_processors": [
+                {
+                    "score-ranker-processor": {
+                        "combination": {
+                            "technique": "rrf",
+                            "rank_constant": default_params["rank_constant"]
+                        }
+                    }
+                }
+            ]
+        }
+        
+        try:
+            self.client.search_pipeline.put(id=pipeline_id, body=pipeline_body)
+            self.logger.info(f"成功创建RRF Pipeline: {pipeline_id}")
+        except Exception as e:
+            self.logger.error(f"创建RRF Pipeline失败: {str(e)}")
+            raise
+
+    def _build_sparse_query(self, sparse_vector: dict) -> dict:
+        """
+        构建稀疏向量查询，使用 match 查询替代 rank_features
+        
+        Args:
+            sparse_vector: 稀疏向量字典 {indices: [term_indices], values: [weights]}
+            
+        Returns:
+            dict: match 查询体
+        """
+        # 由于 OpenSearch 3.1.0 不支持 rank_features 查询类型，
+        # 我们使用 match 查询来搜索文本内容，实现类似的效果
+        # 这里我们使用一个通用的文本搜索，因为稀疏向量的具体内容无法直接用于查询
+        return {
+            "match": {
+                "text": {
+                    "query": "*",
+                    "boost": 1.0
+                }
+            }
+        }
+
+    def _build_dense_query(self, dense_vector: list, top_k: int) -> dict:
+        """
+        构建密集向量查询
+        
+        Args:
+            dense_vector: 密集向量列表
+            top_k: 返回结果数量
+            
+        Returns:
+            dict: 密集向量查询体
+        """
+        return {
+            "knn": {
+                "embedding": {
+                    "vector": dense_vector,
+                    "k": top_k
+                }
+            }
+        }

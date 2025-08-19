@@ -1,19 +1,44 @@
 import logging
 import os
 import copy
+import heapq
+import json
+import re
+import time
 from datetime import datetime
 from opensearchpy import OpenSearch
 from http import HTTPStatus
 from .coninterface import ConnectionInterface
-from config import OPENSEARCH_URI, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD, OPENSEARCH_INDEX, EMBEDDING_MODEL_QWEN, QWEN_DIMENSION, ALIYUN_RERANK_MODEL, RERANK_TOPK, HYBRID_ALGORITHM
+from config import OPENSEARCH_URI, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD, OPENSEARCH_INDEX, QWEN_DIMENSION, ALIYUN_RERANK_MODEL, RERANK_TOPK, HYBRID_ALGORITHM, RRF_SPARSE_TERMS_BOOST, RRF_DEFAULT_RANK_CONSTANT, RRF_SPARSE_WEIGHT, RRF_DENSE_WEIGHT, RRF_WINDOW_MULTIPLIER, RRF_MAX_WINDOW_SIZE
 from opensearchpy import OpenSearch
 from typing import List, Dict
 import dashscope
 from http import HTTPStatus
-
-
+from config import PIPELINE_BM25_BOOST, PIPELINE_VECTOR_BOOST, HYBRID_ALPHA
+from config import QUERY_LENGTH_THRESHOLDS, BOOST_WEIGHTS, MATCH_PHRASE_CONFIG, HEADING_WEIGHTS, ENABLE_PIPELINE_CACHE
 # Opensearch数据库的处理类,负责数据转化,数据上传,数据搜索
 class OpenSearchConnection(ConnectionInterface):
+    def _clean_term(self, term: str) -> str:
+        """
+        清洗术语，防止DSL注入
+        
+        Args:
+            term: 原始术语
+            
+        Returns:
+            str: 清洗后的术语
+        """
+        if not term:
+            return ""
+        
+        # 移除特殊字符，只保留字母、数字、中文字符和基本标点
+        cleaned = re.sub(r'[^\w\s\u4e00-\u9fff.,!?;:]', '', str(term))
+        
+        # 移除多余空格
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        
+        return cleaned
+    
     def __init__(self, index: str = None, uri: str = None, username: str = None, password: str = None):
         # 初始化logger
         self.logger = logging.getLogger(__name__)
@@ -35,6 +60,13 @@ class OpenSearchConnection(ConnectionInterface):
                 use_ssl=True,
                 verify_certs=False
             )
+            
+            # 获取OpenSearch版本
+            self.version = self._get_opensearch_version()
+            self.logger.info(f"OpenSearch版本: {self.version}")
+            
+            # 添加管道缓存
+            self._pipeline_cache = {}
             
             # 初始化成功后立即进行心跳测试
             self.logger.info("OpenSearch客户端初始化成功，开始心跳测试...")
@@ -189,8 +221,9 @@ class OpenSearchConnection(ConnectionInterface):
             if algorithm == 'pipeline':
                 # 从 kwargs 中提取 pipeline 所需参数
                 query_vector = kwargs.get('query_vector')
-                bm25_weight = kwargs.get('bm25_weight', 0.7)
-                vector_weight = kwargs.get('vector_weight', 0.3)
+                # 从配置文件读取默认权重，避免硬编码
+                bm25_weight = kwargs.get('bm25_weight', 1.0 - HYBRID_ALPHA)
+                vector_weight = kwargs.get('vector_weight', HYBRID_ALPHA)
                 
                 if not query_vector:
                     raise ValueError("pipeline方式需要query_vector参数")
@@ -267,8 +300,7 @@ class OpenSearchConnection(ConnectionInterface):
         return results
         
     def hybrid_search_pipeline(self, query: str, query_vector: list, filter: dict = None, top_k: int = 20, 
-                     bm25_weight: float = 0.7, vector_weight: float = 0.3, 
-                     use_hybrid_query: bool = True) -> dict:
+                     bm25_weight: float = 0.7, vector_weight: float = 0.3) -> dict:
         """
         执行混合搜索（BM25 + 向量搜索）- Pipeline方式
         
@@ -279,7 +311,6 @@ class OpenSearchConnection(ConnectionInterface):
             top_k: 返回结果数量
             bm25_weight: BM25搜索权重 (0.0-1.0)
             vector_weight: 向量搜索权重 (0.0-1.0)
-            use_hybrid_query: 是否使用 hybrid 查询（推荐），False 使用 bool+should 方式
             
         Returns:
             dict: 包含total和hits的搜索结果
@@ -295,14 +326,14 @@ class OpenSearchConnection(ConnectionInterface):
             if not query_vector or len(query_vector) != 2048:
                 raise ValueError(f"查询向量维度不正确: {len(query_vector) if query_vector else 0}")
             
-            self.logger.info(f"Hybrid搜索开始，查询: {query}，向量维度: {len(query_vector)}，使用查询类型: {'hybrid' if use_hybrid_query else 'bool+should'}")
+            self.logger.info(f"Hybrid搜索开始，查询: {query}，向量维度: {len(query_vector)}，OpenSearch版本: {self.version}")
             
             # 3. 创建或获取搜索管道
             pipeline_id = self._get_or_create_search_pipeline()
             
-            # 4. 根据参数选择查询构建方式
-            if use_hybrid_query:
-                search_body = self._build_hybrid_query(query, query_vector, filter, top_k)
+            # 4. 根据OpenSearch版本选择查询构建方式
+            if self._should_use_optimized_query():
+                search_body = self._build_hybrid_query_optimized(query, query_vector, filter, top_k)
             else:
                 search_body = self._build_hybrid_query_with_weights(query, query_vector, bm25_weight, vector_weight, filter, top_k)
             
@@ -397,7 +428,7 @@ class OpenSearchConnection(ConnectionInterface):
         Returns:
             dict: 搜索查询体
         """
-        from config import PIPELINE_BM25_BOOST, PIPELINE_VECTOR_BOOST
+
         
         # 基础查询结构
         search_body = {
@@ -532,6 +563,46 @@ class OpenSearchConnection(ConnectionInterface):
                 
         except Exception as e:
             self.logger.error(f"OpenSearch心跳检测失败: {str(e)}")
+            return False
+
+    def _get_opensearch_version(self) -> str:
+        """
+        获取OpenSearch版本信息
+        
+        Returns:
+            str: OpenSearch版本号，如 "2.9.0"
+        """
+        try:
+            info = self.client.info()
+            version = info.get('version', {}).get('number', '0.0.0')
+            self.logger.info(f"获取到OpenSearch版本: {version}")
+            return version
+        except Exception as e:
+            self.logger.warning(f"获取OpenSearch版本失败，使用默认版本: {str(e)}")
+            return "0.0.0"
+
+    def _should_use_optimized_query(self) -> bool:
+        """
+        判断是否应该使用优化的查询构建方式
+        
+        Returns:
+            bool: True表示使用_build_hybrid_query_optimized，False表示使用_build_hybrid_query_with_weights
+        """
+        try:
+            # 解析版本号
+            version_parts = self.version.split('.')
+            major = int(version_parts[0])
+            minor = int(version_parts[1])
+            
+            # OpenSearch 2.9+ 支持优化的查询方式
+            if major > 2 or (major == 2 and minor >= 9):
+                self.logger.info(f"OpenSearch版本 {self.version} >= 2.9，使用优化的查询构建方式")
+                return True
+            else:
+                self.logger.info(f"OpenSearch版本 {self.version} < 2.9，使用传统权重查询构建方式")
+                return False
+        except (ValueError, IndexError) as e:
+            self.logger.warning(f"版本解析失败，使用传统查询方式: {str(e)}")
             return False
 
     def adaptive_data(self, chunk: dict, chunk_id: str, bm25_manager, pre_generated_embedding: list = None) -> dict:
@@ -1010,10 +1081,331 @@ class OpenSearchConnection(ConnectionInterface):
             self.logger.error(error_msg)
             return []
 
+    def _normalize_sparse_vector(self, sparse_vector: dict) -> dict:
+        """
+        稀疏向量预处理和格式验证
+        
+        Args:
+            sparse_vector: 原始稀疏向量
+            
+        Returns:
+            dict: 标准化后的稀疏向量
+        """
+        if not sparse_vector:
+            raise ValueError("sparse_vector不能为空")
+        
+        # 处理不同格式的稀疏向量
+        if isinstance(sparse_vector, dict) and 'indices' in sparse_vector:
+            # 格式1: {indices: [...], values: [...]}
+            if 'values' not in sparse_vector:
+                raise ValueError("sparse_vector格式错误：缺少values字段")
+            
+            indices = sparse_vector['indices']
+            values = sparse_vector['values']
+            
+            # 验证长度一致性
+            if len(indices) != len(values):
+                raise ValueError(f"indices和values长度不一致: indices={len(indices)}, values={len(values)}")
+            
+            # 验证indices不能为负数
+            if any(i < 0 for i in indices):
+                raise ValueError(f"检测到非法负数index: {indices}")
+            
+            # 权重归一化处理
+            if values:
+                max_value = max(values)
+                if max_value > 0:
+                    normalized_values = [v / max_value for v in values]
+                else:
+                    normalized_values = values
+            else:
+                normalized_values = values
+            
+            return {
+                'indices': indices,
+                'values': normalized_values
+            }
+        else:
+            # 格式2: {term: weight} - 转换为indices格式
+            if not isinstance(sparse_vector, dict):
+                raise ValueError("sparse_vector必须是字典格式")
+            
+            # 按权重排序，取前10个最重要的术语
+            sorted_terms = sorted(sparse_vector.items(), key=lambda x: x[1], reverse=True)[:10]
+            
+            if not sorted_terms:
+                raise ValueError("sparse_vector中没有有效的术语")
+            
+            # 提取indices和values（这里indices是术语的字符串表示）
+            indices = [str(term) for term, _ in sorted_terms]
+            values = [weight for _, weight in sorted_terms]
+            
+            # 权重归一化
+            max_value = max(values)
+            if max_value > 0:
+                normalized_values = [v / max_value for v in values]
+            else:
+                normalized_values = values
+            
+            return {
+                'indices': indices,
+                'values': normalized_values
+            }
+
+    def _validate_dense_vector(self, dense_vector: list):
+        """
+        验证密集向量格式和维度
+        
+        Args:
+            dense_vector: 密集向量列表
+            
+        Raises:
+            ValueError: 向量格式或维度不正确时抛出异常
+        """
+        if not dense_vector:
+            raise ValueError("dense_vector不能为空")
+        
+        if not isinstance(dense_vector, list):
+            raise ValueError("dense_vector必须是列表格式")
+        
+        # 验证维度（使用配置的维度）
+        if len(dense_vector) != QWEN_DIMENSION:
+            raise ValueError(f"密集向量维度应为{QWEN_DIMENSION}，实际为{len(dense_vector)}")
+        
+        # 验证向量元素类型
+        if not all(isinstance(x, (int, float)) for x in dense_vector):
+            raise ValueError("dense_vector中的所有元素必须是数字类型")
+
+    def _configure_rrf_params(self, rrf_params: dict = None, top_k: int = 20) -> dict:
+        """
+        配置RRF参数，提供智能默认值
+        
+        Args:
+            rrf_params: 用户自定义参数
+            top_k: 返回结果数量
+            
+        Returns:
+            dict: 配置完成的RRF参数
+        """
+        # 设置合理的默认RRF参数
+        default_rrf_params = {
+            "window_size": min(top_k * RRF_WINDOW_MULTIPLIER, RRF_MAX_WINDOW_SIZE),  # 使用配置的窗口倍数，但不超过最大值
+            "rank_constant": RRF_DEFAULT_RANK_CONSTANT,  # 标准RRF常数
+            "combination_technique": "rrf"  # 使用RRF组合技术
+        }
+        
+        # 合并用户自定义参数
+        if rrf_params:
+            # 参数验证
+            self._validate_rrf_params(rrf_params)
+            default_rrf_params.update(rrf_params)
+        
+        return default_rrf_params
+
+    def _validate_rrf_params(self, rrf_params: dict):
+        """
+        验证RRF参数的有效性
+        
+        Args:
+            rrf_params: RRF参数字典
+            
+        Raises:
+            ValueError: 参数无效时抛出异常
+        """
+        if 'window_size' in rrf_params:
+            window_size = rrf_params['window_size']
+            if not isinstance(window_size, int) or window_size <= 0:
+                raise ValueError("window_size必须是正整数")
+            if window_size > RRF_MAX_WINDOW_SIZE:
+                raise ValueError(f"window_size不能超过{RRF_MAX_WINDOW_SIZE}，过大的窗口可能影响性能")
+        
+        if 'rank_constant' in rrf_params:
+            rank_constant = rrf_params['rank_constant']
+            if not isinstance(rank_constant, (int, float)) or rank_constant <= 0:
+                raise ValueError("rank_constant必须是正数")
+
+    def _build_optimized_rrf_query(self, query: str, sparse_vector: dict, dense_vector: list, 
+                                  filter: dict = None, top_k: int = 20, rrf_params: dict = None) -> dict:
+        """
+        构建优化的RRF查询
+        
+        Args:
+            query: 查询文本
+            sparse_vector: 稀疏向量字典
+            dense_vector: 密集向量列表
+            filter: 过滤条件
+            top_k: 返回结果数量
+            rrf_params: RRF算法参数
+            
+        Returns:
+            dict: 优化的搜索查询体
+        """
+        # 构建稀疏向量查询
+        sparse_query = self._build_sparse_query_optimized(sparse_vector)
+        
+        # 构建密集向量查询
+        dense_query = self._build_dense_query(dense_vector, top_k)
+        
+        # 应用配置的权重
+        if 'terms' in sparse_query:
+            sparse_query['terms']['boost'] = RRF_SPARSE_WEIGHT
+        if 'knn' in dense_query:
+            dense_query['knn']['embedding']['boost'] = RRF_DENSE_WEIGHT
+        
+        # 构建混合查询
+        search_body = {
+            "size": min(top_k, 100),  # 分页保护，防止过大请求
+            "query": {
+                "hybrid": {
+                    "queries": [
+                        sparse_query,    # 稀疏向量查询
+                        dense_query      # 密集向量查询
+                    ]
+                }
+            }
+        }
+        
+        # 添加过滤条件
+        if filter:
+            search_body["query"]["hybrid"]["filter"] = self._build_filter_query(filter)
+        
+        return search_body
+
+
+
+    def _analyze_search_results(self, hits: dict, top_k: int):
+        """
+        分析搜索结果，记录性能指标
+        
+        Args:
+            hits: 搜索结果
+            top_k: 请求的结果数量
+        """
+        # 验证结果格式
+        if 'hits' not in hits:
+            self.logger.warning("RRF搜索结果格式异常，缺少'hits'字段")
+            return
+        
+        # 记录前N个结果的分数分布
+        if hits['hits']:
+            scores = [hit.get('_score', 0) for hit in hits['hits'][:5]]
+            if scores:
+                min_score = min(scores)
+                max_score = max(scores)
+                avg_score = sum(scores) / len(scores)
+                self.logger.info(f"RRF搜索结果分数分布: min={min_score:.4f}, max={max_score:.4f}, avg={avg_score:.4f}")
+        
+        # 记录结果数量
+        total_results = hits.get('total', {}).get('value', 0)
+        self.logger.info(f"RRF搜索返回 {total_results} 个结果，请求 {top_k} 个")
+
+    def _log_performance_metrics(self, metrics: dict):
+        """
+        记录性能指标
+        
+        Args:
+            metrics: 性能指标字典
+        """
+        operation = metrics.get('operation', 'unknown')
+        duration = metrics.get('duration', 0)
+        result_count = metrics.get('result_count', 0)
+        query_length = metrics.get('query_length', 0)
+        
+        self.logger.info(f"性能指标 | {operation} | 耗时: {duration:.4f}s | 结果数: {result_count} | 查询长度: {query_length}")
+        
+        # 记录慢查询警告
+        if duration > 5.0:  # 超过5秒的查询
+            self.logger.warning(f"慢查询警告: {operation} 耗时 {duration:.4f}s")
+
+    def _build_sparse_query_optimized(self, sparse_vector: dict) -> dict:
+        """
+        构建优化的稀疏向量查询，使用terms查询替代通配符匹配
+        
+        Args:
+            sparse_vector: 稀疏向量字典
+            
+        Returns:
+            dict: 优化的terms查询体
+        """
+        if not sparse_vector:
+            # 兜底：返回通用文本搜索
+            return {
+                "match": {
+                    "text": {
+                        "query": "*",
+                        "boost": 1.0
+                    }
+                }
+            }
+        
+        # 处理不同格式的稀疏向量
+        if isinstance(sparse_vector, dict) and 'indices' in sparse_vector:
+            # 格式1: {indices: [...], values: [...]}
+            if 'values' in sparse_vector and len(sparse_vector['indices']) == len(sparse_vector['values']):
+                # 使用堆排序获取前10个最重要的术语，性能优化 O(n log k)
+                term_weights = list(zip(sparse_vector['indices'], sparse_vector['values']))
+                top_terms = heapq.nlargest(10, term_weights, key=lambda x: x[1])
+                top_terms = [str(term) for term, _ in top_terms]
+            else:
+                # 只有indices，直接使用
+                top_terms = [str(idx) for idx in sparse_vector['indices'][:10]]
+        else:
+            # 格式2: {term: weight} - 使用堆排序优化性能
+            top_terms = heapq.nlargest(10, sparse_vector.items(), key=lambda x: x[1])
+            top_terms = [term for term, _ in top_terms]
+        
+        # 术语清洗，防止DSL注入
+        cleaned_terms = [self._clean_term(term) for term in top_terms if term.strip()]
+        
+
+        return {
+            "terms": {
+                "text": cleaned_terms,
+                "boost": RRF_SPARSE_TERMS_BOOST  # 使用配置的boost值，提高稀疏向量查询权重
+            }
+        }
+
+    def _create_rrf_pipeline_optimized(self, pipeline_id: str, rrf_params: dict = None):
+        """
+        创建优化的RRF Search Pipeline，支持版本控制和参数校验
+        
+        Args:
+            pipeline_id: Pipeline ID
+            rrf_params: RRF算法参数
+        """
+        # 参数校验
+        required_params = ['window_size', 'rank_constant']
+        for param in required_params:
+            if param not in rrf_params:
+                raise ValueError(f"创建RRF管道缺少必要参数: {param}")
+        
+        # 添加管道版本标识
+        pipeline_body = {
+            "description": f"RRF Pipeline v2 (constant={rrf_params['rank_constant']})",
+            "phase_results_processors": [
+                {
+                    "score-ranker-processor": {
+                        "combination": {
+                            "technique": "rrf",
+                            "rank_constant": rrf_params["rank_constant"],
+                            "window_size": rrf_params["window_size"]
+                        }
+                    }
+                }
+            ]
+        }
+        
+        try:
+            self.client.search_pipeline.put(id=pipeline_id, body=pipeline_body)
+            self.logger.info(f"RRF Pipeline创建成功: {pipeline_id}")
+        except Exception as e:
+            self.logger.error(f"RRF Pipeline创建失败: {str(e)}")
+            raise
+
     def hybrid_search_rrf(self, query: str, sparse_vector: dict, dense_vector: list, 
                          filter: dict = None, top_k: int = 20, rrf_params: dict = None) -> dict:
         """
-        执行RRF混合搜索（稀疏向量 + 密集向量）
+        优化后的RRF混合搜索实现
         
         Args:
             query: 查询文本
@@ -1030,41 +1422,49 @@ class OpenSearchConnection(ConnectionInterface):
             # 1. 确保连接
             self._ensure_connection()
             
-            # 2. 验证参数
-            if not sparse_vector or not dense_vector:
-                raise ValueError("sparse_vector 和 dense_vector 都不能为空")
+            # 2. 参数预处理和验证
+            start_time = time.perf_counter()
+            sparse_vector = self._normalize_sparse_vector(sparse_vector)
+            self._validate_dense_vector(dense_vector)
             
-            if len(dense_vector) != 2048:
-                raise ValueError(f"密集向量维度不正确: {len(dense_vector)}")
+            # 3. 配置RRF参数
+            rrf_params = self._configure_rrf_params(rrf_params, top_k)
             
-            self.logger.info(f"RRF Hybrid搜索开始，查询: {query}，稀疏向量项数: {len(sparse_vector)}，密集向量维度: {len(dense_vector)}")
+            self.logger.info(f"RRF Hybrid搜索 | 查询: '{query[:50]}...' | 稀疏术语数: {len(sparse_vector.get('indices', []))} | 密集维度: {len(dense_vector)}")
             
-            # 3. 获取或创建RRF Search Pipeline
+            # 4. 获取或创建RRF管道
             pipeline_id = self._get_or_create_rrf_pipeline(rrf_params)
             
-            # 4. 构建查询
-            search_body = self._build_hybrid_query_rrf(query, sparse_vector, dense_vector, filter, top_k, rrf_params)
+            # 5. 构建优化查询
+            search_body = self._build_optimized_rrf_query(
+                query, sparse_vector, dense_vector, filter, top_k, rrf_params
+            )
             
-            # 5. 执行搜索（使用RRF Pipeline）
+            # 6. 执行搜索
             response = self.client.search(
                 body=search_body,
                 index=self.index,
-                search_pipeline=pipeline_id
+                search_pipeline=pipeline_id,
+                request_timeout=30
             )
             
-            # 5. 处理结果
+            # 7. 处理和分析结果
             hits = response.get('hits', {})
+            self._analyze_search_results(hits, top_k)
             
-            # 添加调试日志
-            self.logger.debug(f"RRF OpenSearch 原始响应: {response}")
-            self.logger.debug(f"RRF 提取的 hits 字段: {hits}")
-            self.logger.debug(f"RRF hits 类型: {type(hits)}")
+            # 8. 记录性能指标
+            duration = time.perf_counter() - start_time
+            self._log_performance_metrics({
+                'operation': 'hybrid_search_rrf',
+                'duration': duration,
+                'result_count': len(hits.get('hits', [])),
+                'query_length': len(query)
+            })
             
-            self.logger.info(f"RRF Hybrid搜索完成，查询: {query}，返回 {hits.get('total', {}).get('value', 0)} 个结果")
             return response
             
         except Exception as e:
-            self.logger.error(f"RRF Hybrid搜索失败: {str(e)}")
+            self.logger.error(f"RRF Hybrid搜索失败: {str(e)}", exc_info=True)
             raise
 
     def _build_hybrid_query_rrf(self, query: str, sparse_vector: dict, dense_vector: list, 
@@ -1091,7 +1491,7 @@ class OpenSearchConnection(ConnectionInterface):
         
         # 构建混合查询（不包含rank.rrf，RRF逻辑通过Search Pipeline实现）
         search_body = {
-            "size": top_k,
+            "size": min(top_k, 100),  # 分页保护，防止过大请求
             "query": {
                 "hybrid": {
                     "queries": [
@@ -1118,15 +1518,24 @@ class OpenSearchConnection(ConnectionInterface):
         Returns:
             str: Pipeline ID
         """
-        pipeline_id = "hybrid_rrf_pipeline"
+        # 生成固定的Pipeline ID（基于参数）
+        if rrf_params:
+            rank_constant = rrf_params.get('rank_constant', RRF_DEFAULT_RANK_CONSTANT)
+            window_size = rrf_params.get('window_size', RRF_MAX_WINDOW_SIZE)
+        else:
+            rank_constant = RRF_DEFAULT_RANK_CONSTANT
+            window_size = RRF_MAX_WINDOW_SIZE
+        
+        # 使用固定算法生成Pipeline ID
+        pipeline_id = f"rrf_pipeline_rc{rank_constant}_ws{window_size}"
         
         try:
             # 尝试获取现有Pipeline
             self.client.search_pipeline.get(id=pipeline_id)
-            self.logger.info(f"使用现有RRF Pipeline: {pipeline_id}")
+            self.logger.info(f"✅ 复用现有RRF Pipeline: {pipeline_id}")
         except Exception:
             # Pipeline不存在，创建新的
-            self.logger.info(f"RRF Pipeline不存在，正在创建: {pipeline_id}")
+            self.logger.info(f"🆕 创建新RRF Pipeline: {pipeline_id}")
             self._create_rrf_pipeline(pipeline_id, rrf_params)
         
         return pipeline_id
@@ -1142,7 +1551,7 @@ class OpenSearchConnection(ConnectionInterface):
         # 设置默认参数
         default_params = {
             "window_size": 20,
-            "rank_constant": 60
+            "rank_constant": RRF_DEFAULT_RANK_CONSTANT
         }
         
         if rrf_params:
@@ -1169,27 +1578,205 @@ class OpenSearchConnection(ConnectionInterface):
             self.logger.error(f"创建RRF Pipeline失败: {str(e)}")
             raise
 
-    def _build_sparse_query(self, sparse_vector: dict) -> dict:
+    def _build_sparse_query(self, sparse_vector: dict, query_text: str = None) -> dict:
         """
-        构建稀疏向量查询，使用 match 查询替代 rank_features
+        构建稀疏向量查询，默认使用match_phrase策略
         
         Args:
-            sparse_vector: 稀疏向量字典 {indices: [term_indices], values: [weights]}
+            sparse_vector: 稀疏向量字典
+            query_text: 查询文本，用于match_phrase查询
             
         Returns:
-            dict: match 查询体
+            dict: 查询体
         """
-        # 由于 OpenSearch 3.1.0 不支持 rank_features 查询类型，
-        # 我们使用 match 查询来搜索文本内容，实现类似的效果
-        # 这里我们使用一个通用的文本搜索，因为稀疏向量的具体内容无法直接用于查询
-        return {
+        # 默认使用match_phrase策略进行试验
+        if query_text:
+            #return self._build_sparse_query_terms(sparse_vector)
+            return self._build_match_phrase_query(query_text)
+        else:
+            # 兜底：返回通用文本搜索
+            return {
+                "match": {
+                    "text": {
+                        "query": "*",
+                        "boost": 1.0
+                    }
+                }
+            }
+    
+    def _build_sparse_query_terms(self, sparse_vector: dict) -> dict:
+        """
+        构建稀疏向量查询，使用terms策略（用于对比试验）
+        
+        Args:
+            sparse_vector: 稀疏向量字典
+            query_text: 查询文本（此方法中不使用）
+            
+        Returns:
+            dict: 查询体
+        """
+        return self._build_terms_query(sparse_vector)
+
+
+
+    def _is_query_text_quality_good(self, query_text: str) -> bool:
+        """评估查询文本质量"""
+        if not query_text or len(query_text.strip()) < 2:
+            return False
+        
+        # 检查是否包含有效关键词
+        meaningful_words = [word for word in query_text.split() if len(word) > 1]
+        return len(meaningful_words) >= 2
+
+    def _is_sparse_vector_quality_good(self, sparse_vector: dict) -> bool:
+        """评估稀疏向量质量"""
+        if not sparse_vector:
+            return False
+        
+        # 检查是否有足够的有效术语
+        if 'indices' in sparse_vector:
+            return len(sparse_vector.get('indices', [])) >= 3
+        else:
+            return len(sparse_vector) >= 3
+
+    def _build_match_phrase_query(self, query_text: str) -> dict:
+        """构建match_phrase查询，支持模糊匹配过滤"""
+        
+        # 预处理查询文本
+        processed_query = self._preprocess_query_text(query_text)
+        
+        # 构建基础查询
+        query_body = {
             "match": {
                 "text": {
-                    "query": "*",
-                    "boost": 1.0
+                    "query": processed_query,
+                    "boost": MATCH_PHRASE_CONFIG['default_boost'],
+                    "operator": MATCH_PHRASE_CONFIG['operator'],
+                    "fuzziness": MATCH_PHRASE_CONFIG['fuzziness'],
+                    "max_expansions": MATCH_PHRASE_CONFIG['max_expansions'],
+                    "prefix_length": MATCH_PHRASE_CONFIG['prefix_length']
                 }
             }
         }
+        
+        # 添加模糊匹配过滤配置（DeepSeek建议）
+        if MATCH_PHRASE_CONFIG.get('fuzzy_filters'):
+            query_body["match"]["text"]["fuzzy_options"] = MATCH_PHRASE_CONFIG['fuzzy_filters']
+        
+        return query_body
+
+    def _build_terms_query(self, sparse_vector: dict) -> dict:
+        """构建terms查询（保持当前实现）"""
+        if not sparse_vector:
+            # 兜底：返回通用文本搜索
+            return {
+                "match": {
+                    "text": {
+                        "query": "*",
+                        "boost": 1.0
+                    }
+                }
+            }
+        
+        # 处理不同格式的稀疏向量
+        if isinstance(sparse_vector, dict) and 'indices' in sparse_vector:
+            # 格式1: {indices: [...], values: [...]}
+            if 'values' in sparse_vector and len(sparse_vector['indices']) == len(sparse_vector['values']):
+                # 使用堆排序获取前10个最重要的术语，性能优化 O(n log k)
+                term_weights = list(zip(sparse_vector['indices'], sparse_vector['values']))
+                top_terms = heapq.nlargest(10, term_weights, key=lambda x: x[1])
+                top_terms = [str(term) for term, _ in top_terms]
+            else:
+                # 只有indices，直接使用
+                top_terms = [str(idx) for idx in sparse_vector['indices'][:10]]
+        else:
+            # 格式2: {term: weight} - 使用堆排序优化性能
+            top_terms = heapq.nlargest(10, sparse_vector.items(), key=lambda x: x[1])
+            top_terms = [term for term, _ in top_terms]
+        
+        # 术语清洗，防止DSL注入
+        cleaned_terms = [self._clean_term(term) for term in top_terms if term.strip()]
+        
+        return {
+            "terms": {
+                "text": cleaned_terms,
+                "boost": RRF_SPARSE_TERMS_BOOST  # 使用配置的boost值，提高稀疏向量查询权重
+            }
+        }
+
+    def _build_hybrid_query(self, sparse_vector: dict, query_text: str) -> dict:
+        """构建混合查询，结合match_phrase和terms"""
+        
+        return {
+            "bool": {
+                "should": [
+                    # 主要查询：match_phrase（带模糊过滤）
+                    {
+                        "match": {
+                            "text": {
+                                "query": query_text,
+                                "boost": MATCH_PHRASE_CONFIG['match_phrase_weight'],
+                                "operator": "or",
+                                "fuzziness": "AUTO",
+                                "fuzzy_options": MATCH_PHRASE_CONFIG.get('fuzzy_filters', [])
+                            }
+                        }
+                    },
+                    # 辅助查询：terms（权重较低）
+                    self._build_terms_query(sparse_vector)
+                ],
+                "minimum_should_match": 1
+            }
+        }
+
+    def _apply_fuzzy_filters(self, query_text: str) -> str:
+        """应用模糊匹配过滤，保护专有名词，过滤高频词"""
+        
+        if not MATCH_PHRASE_CONFIG.get('fuzzy_filters'):
+            return query_text
+        
+        # 分词处理
+        words = query_text.split()
+        filtered_words = []
+        
+        for word in words:
+            # 检查词长度
+            if len(word) < MATCH_PHRASE_CONFIG['term_frequency_thresholds']['min_word_length']:
+                continue
+            if len(word) > MATCH_PHRASE_CONFIG['term_frequency_thresholds']['max_word_length']:
+                continue
+            
+            # 这里可以添加更复杂的词频检查逻辑
+            # 例如：检查是否在专有名词词典中，或检查文档频率
+            filtered_words.append(word)
+        
+        return ' '.join(filtered_words)
+
+    def _get_cached_query(self, query_text: str, strategy: str) -> dict:
+        """获取缓存的查询"""
+        cache_key = f"{query_text}_{strategy}"
+        return getattr(self, '_query_cache', {}).get(cache_key)
+
+    def _cache_query(self, query_text: str, strategy: str, query_body: dict):
+        """缓存查询"""
+        if not hasattr(self, '_query_cache'):
+            self._query_cache = {}
+        cache_key = f"{query_text}_{strategy}"
+        self._query_cache[cache_key] = query_body
+
+    def _preprocess_query_text(self, query_text: str) -> str:
+        """预处理查询文本"""
+        # 1. 去除多余空格
+        query_text = ' '.join(query_text.split())
+        
+        # 2. 特殊字符处理
+        query_text = self._clean_term(query_text)
+        
+        # 3. 长度限制
+        if len(query_text) > 200:
+            query_text = query_text[:200]
+        
+        return query_text
 
     def _build_dense_query(self, dense_vector: list, top_k: int) -> dict:
         """
@@ -1209,4 +1796,152 @@ class OpenSearchConnection(ConnectionInterface):
                     "k": top_k
                 }
             }
+        }
+
+    # ========== 混合搜索优化方法骨架 ==========
+    
+    def _build_heading_query(self, query: str) -> dict:
+        """构建层级标题查询，权重递减"""
+        
+        # 使用配置权重，动态构建字段列表
+        fields = [
+            f"{field}^{weight}" 
+            for field, weight in HEADING_WEIGHTS.items()
+        ]
+        
+        return {
+            "multi_match": {
+                "query": query,
+                "fields": fields,
+                "type": "best_fields",
+                "tie_breaker": 0.3
+            }
+        }
+    
+    def _calculate_content_boost(self, query: str) -> float:
+        """根据查询特性动态计算正文权重（带边界检查）"""
+
+        
+        query_length = len(query.split())
+        
+        # 获取阈值配置（带默认值）
+        short_threshold = QUERY_LENGTH_THRESHOLDS.get('short', 4)
+        long_threshold = QUERY_LENGTH_THRESHOLDS.get('medium', 8)
+        
+        # 长查询/详细描述 - 提高正文权重
+        if query_length > long_threshold:
+            return BOOST_WEIGHTS.get('long_query', 1.4)
+        
+        # 中等长度查询
+        elif query_length > short_threshold:
+            return BOOST_WEIGHTS.get('medium_query', 1.2)
+        
+        # 短查询/关键词 - 降低正文权重，侧重标题
+        else:
+            return BOOST_WEIGHTS.get('short_query', 0.8)
+    
+    def _build_content_query(self, query: str) -> dict:
+        """构建正文字段查询"""
+        return {
+            "match": {
+                "text": {
+                    "query": query,
+                    "boost": self._calculate_content_boost(query),
+                    "operator": "or"
+                }
+            }
+        }
+    
+    def _build_metadata_query(self, query: str) -> dict:
+        """构建元数据字段查询"""
+        return {
+            "multi_match": {
+                "query": query,
+                "fields": [
+                    "section_heading^1.5",    # 章节标题
+                    "content_type^1.3",       # 内容类型
+                    "chunk_type^1.2",         # 块类型
+                    "faction^1.0"             # 阵营
+                ],
+                "type": "best_fields"
+            }
+        }
+    
+    def _build_content_type_filter(self, query: str) -> dict:
+        """根据查询内容智能添加内容类型过滤"""
+        # 规则相关查询
+        if any(word in query for word in ["规则", "规则书", "codex", "FAQ"]):
+            return {"content_type": "corerule"}
+        
+        # 单位相关查询
+        elif any(word in query for word in ["单位", "模型", "unit", "数据表"]):
+            return {"chunk_type": "unit_data"}
+        
+        # 背景相关查询
+        elif any(word in query for word in ["背景", "故事", "lore", "历史"]):
+            return {"content_type": "background"}
+        
+        return {}
+    
+    def _build_hybrid_query_optimized(self, query: str, query_vector: list, 
+                                     filter: dict = None, top_k: int = 20) -> dict:
+        """构建优化后的混合搜索查询"""
+        
+        # 1. 层级标题查询
+        heading_query = self._build_heading_query(query)
+        
+        # 2. 正文字段查询
+        content_query = self._build_content_query(query)
+        
+        # 3. 元数据查询
+        metadata_query = self._build_metadata_query(query)
+        
+        # 4. 向量搜索
+        knn_query = {
+            "knn": {
+                "embedding": {
+                    "vector": query_vector,
+                    "k": min(100, top_k * 3),  # 扩大召回池
+                    "boost": PIPELINE_VECTOR_BOOST  # 使用配置文件中的常量
+                }
+            }
+        }
+        
+        # 5. BM25文本查询
+        bm25_query = {
+            "match": {
+                "text": {
+                    "query": query,
+                    "boost": PIPELINE_BM25_BOOST  # 使用配置文件中的常量
+                }
+            }
+        }
+        
+        # 6. 组合查询
+        hybrid_query = {
+            "hybrid": {
+                "queries": [
+                    heading_query,      # 层级标题
+                    bm25_query,         # BM25文本搜索
+                    content_query,      # 正文内容
+                    metadata_query,     # 元数据
+                    knn_query          # 向量搜索
+                ]
+            }
+        }
+        
+        # 7. 智能过滤（不覆盖用户显式设置的过滤条件）
+        if filter:
+            smart_filter = self._build_content_type_filter(query)
+            if smart_filter:
+                # 只添加用户未指定的过滤条件，避免覆盖用户设置
+                for key, value in smart_filter.items():
+                    if key not in filter:
+                        filter[key] = value
+            
+            hybrid_query["hybrid"]["filter"] = self._build_filter_query(filter)
+        
+        return {
+            "size": top_k,
+            "query": hybrid_query  # 直接返回 hybrid_query，保持过滤条件
         }

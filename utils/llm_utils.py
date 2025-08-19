@@ -8,50 +8,33 @@ llm_utils.py - 通用LLM调用工具
 import logging
 from typing import Optional, Dict, Any, List, Union
 from openai import OpenAI
-from config import LLM_MODEL
+from config import LLM_TYPE,DEFAULT_TEMPERATURE,MAX_ANSWER_TOKENS
+from llm.llm_factory import LLMFactory
 
 logger = logging.getLogger(__name__)
 
-def call_llm(client: OpenAI, 
-             prompt: Union[str, List[Dict[str, str]]], 
-             model: str = LLM_MODEL,
-             temperature: float = 0.2,
-             max_tokens: int = 3000,
+def call_llm(prompt: Union[str, List[Dict[str, str]]], 
+             model_type: str = LLM_TYPE,
+             temperature: float = DEFAULT_TEMPERATURE,
+             max_tokens: int = MAX_ANSWER_TOKENS,
              **kwargs) -> str:
     """
     通用LLM调用函数
     
     Args:
-        client: OpenAI客户端实例
         prompt: 可以是字符串（作为user message）或消息列表（完整的messages）
-        model: 模型名称
+        model_type: LLM类型（从config获取）
         temperature: 生成温度
         max_tokens: 最大token数
-        **kwargs: 其他OpenAI API参数
+        **kwargs: 其他LLM API参数
         
     Returns:
         str: LLM响应内容，失败时返回错误信息
     """
     try:
-        # 处理不同的prompt格式
-        if isinstance(prompt, str):
-            # 字符串格式：直接作为user message
-            messages = [{"role": "user", "content": prompt}]
-        elif isinstance(prompt, list):
-            # 列表格式：完整的messages
-            messages = prompt
-        else:
-            raise ValueError("prompt必须是字符串或消息列表")
-        
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs
-        )
-        
-        return response.choices[0].message.content.strip()
+        # 使用新的工厂模式创建LLM实例
+        llm = LLMFactory.create_llm(model_type)
+        return llm.call_llm(prompt, temperature, max_tokens, **kwargs)
         
     except Exception as e:
         logger.error(f"LLM调用失败: {str(e)}")

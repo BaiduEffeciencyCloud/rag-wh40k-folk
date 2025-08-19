@@ -16,7 +16,8 @@ from typing import Optional
 # 导入全局配置
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) or '.')
-from config import LLM_MODEL, OPENAI_API_KEY
+from config import LLM_MODEL, OPENAI_API_KEY, DEFAULT_TEMPERATURE, MAX_ANSWER_TOKENS
+from utils.llm_utils import call_llm
 
 def build_llm_prompt(md_path: str, md_text: str) -> list:
     """
@@ -66,14 +67,10 @@ def analyze_report_with_llm(md_path: str, api: Optional[str] = None, save_dir: O
     prompt = build_llm_prompt(md_path, md_text)
     llm_result = None
     try:
-        from utils.llm_utils import call_llm
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
         llm_result = call_llm(
-            client=client,
             prompt=prompt,
-            temperature=0.3,
-            max_tokens=2048
+            temperature=DEFAULT_TEMPERATURE,
+            max_tokens=MAX_ANSWER_TOKENS
         )
     except Exception as e:
         llm_result = f"[LLM分析] API调用失败: {e}\n(可切换为本地模拟或检查API配置)"

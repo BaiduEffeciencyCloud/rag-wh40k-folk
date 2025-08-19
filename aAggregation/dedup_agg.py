@@ -1,15 +1,14 @@
 from .agginterface import AggregationInterface
 from typing import List, Dict, Any
-from openai import OpenAI
-import os
 import logging
-from config import OPENAI_API_KEY, LLM_MODEL
+from config import  MAX_ANSWER_TOKENS, DEFAULT_TEMPERATURE
+from utils.llm_utils import call_llm, build_messages
 
 logger = logging.getLogger(__name__)
 
 class DedupAggregation(AggregationInterface):
     def __init__(self):
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        pass
 
     def extract_answer(self, search_results) -> List[str]:
         all_answers = self._extract_all_texts(search_results)
@@ -96,17 +95,15 @@ class DedupAggregation(AggregationInterface):
 
 用户问题："{query}"
 """
-            from utils.llm_utils import call_llm, build_messages
-            
             messages = build_messages(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt
             )
+            logger.info(f"语义解析消息: {messages}")
             return call_llm(
-                client=self.client,
                 prompt=messages,
-                temperature=0.4,
-                max_tokens=3000
+                temperature=DEFAULT_TEMPERATURE,
+                max_tokens=MAX_ANSWER_TOKENS
             )
         except Exception as e:
             logger.error(f"语义解析时出错：{str(e)}")

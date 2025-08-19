@@ -84,8 +84,8 @@ DEFAULT_TOP_K = 15  # 默认返回结果数量
 QUERY_TIMEOUT = 30  # 查询超时时间（秒）
 
 # 答案生成配置
-ANSWER_GENERATION_TEMPERATURE = 0.3  # 答案生成温度，控制创造性
-ANSWER_MAX_TOKENS = 2000  # 答案生成最大token数
+DEFAULT_TEMPERATURE = 0.3  # 默认温度参数，控制生成文本的随机性
+MAX_ANSWER_TOKENS = 2000  # 答案生成最大token数
 
 # 结果整合配置
 DEDUPLICATION_THRESHOLD = 0.8  # 去重阈值，相似度超过此值视为重复
@@ -110,8 +110,8 @@ EMBEDDING_USE_EXPONENTIAL_BACKOFF = True  # 是否使用指数退避策略
 EMBEDDING_BACKOFF_FACTOR = 2.0  # 退避因子
 EMBEDDING_MAX_BACKOFF_DELAY = 30.0  # 最大退避延迟（秒）
 
-
-
+# LLM类型,包括 Openai, Deepseek, Gemini
+LLM_TYPE="deepseek"
 # OPEN AI LLM模型
 LLM_MODEL = "gpt-4o"  # OpenAI LLM模型名称
 LLM_IMAGE_MODEL = "gpt-4o"  # OpenAI图像模型名称
@@ -125,32 +125,120 @@ RERANK_MODEL_QWEN = "text-embedding-v4"  # QWEN重排序模型名称
 QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")  # QWEN API密钥（保留环境变量）
 QWEN_DIMENSION = 2048  # QWEN嵌入向量维度
 
+# DEEPSEEK API配置
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+DEEPSEEK_SERVER="https://api.deepseek.com/v1"
+DEEPSEEK_MODEL="deepseek-chat"
 # Hybrid检索配置
 #当 α = 0 时，完全依赖稀疏检索（纯 BM25/TF-IDF）；
 #当 α = 1 时，完全依赖密集检索（纯语义向量匹配）；
 HYBRID_ALPHA = 0.3
 # 混合搜索算法选择
 # 可选值: 'pipeline' (默认) 或 'rrf'
-HYBRID_ALGORITHM = 'rrf'
+HYBRID_ALGORITHM = 'pipeline'
+
 # ========== RRF混合搜索配置 ==========
 # RRF (Reciprocal Rank Fusion) 算法参数配置
-RRF_RANK_CONSTANT = 8  # RRF排名常数，越小区分度越高，建议5-15
-RRF_WINDOW_MULTIPLIER = 5  # RRF窗口大小倍数，越大捕获文档越多，建议3-5
+RRF_RANK_CONSTANT = 10  # RRF排名常数，越小区分度越高，建议5-15
+RRF_WINDOW_MULTIPLIER = 3  # RRF窗口大小倍数，越大捕获文档越多，建议3-5
+RRF_MAX_WINDOW_SIZE = 300  # RRF窗口大小最大值，防止过大的计算开销
+RRF_SPARSE_TERMS_BOOST = 1.2  # RRF稀疏向量terms查询的boost值，提高稀疏向量查询权重
+RRF_DEFAULT_RANK_CONSTANT = 20  # 标准RRF常数，用于RRF算法中的平滑参数
+
+# RRF混合搜索权重配置
+RRF_SPARSE_WEIGHT = 0.8  # RRF稀疏向量查询权重
+RRF_DENSE_WEIGHT = 1.2 # RRF密集向量查询权重
 
 # ========== Pipeline混合搜索配置 ==========
 # Pipeline混合搜索算法参数配置
 PIPELINE_NORMALIZATION_TECHNIQUE = "min_max"  # 归一化技术：min_max, z_score, decimal_scaling, log_scale
 PIPELINE_COMBINATION_TECHNIQUE = "arithmetic_mean"  # 组合技术：arithmetic_mean, geometric_mean, harmonic_mean, weighted_sum
-PIPELINE_BM25_BOOST = 1.0  # BM25搜索boost值，影响BM25结果权重
-PIPELINE_VECTOR_BOOST = 1.0  # 向量搜索boost值，影响向量搜索结果权重
+PIPELINE_BM25_BOOST = 1.5  # BM25搜索boost值，影响BM25结果权重
+PIPELINE_VECTOR_BOOST = 0.8  # 向量搜索boost值，影响向量搜索结果权重
+
+# ========== Match Phrase查询配置 ==========
+# Match Phrase查询算法参数配置
+MATCH_PHRASE_CONFIG = {
+    'enabled': True,                    # 是否启用match_phrase查询
+    'default_boost': 1.5,              # 默认boost值
+    'fuzziness': 'AUTO',               # 模糊匹配级别
+    'operator': 'or',                  # 操作符
+    'max_expansions': 50,              # 最大扩展数
+    'prefix_length': 0,                # 前缀长度
+    'min_score': 0.1,                  # 最小分数阈值
+    
+    # 策略选择阈值
+    'query_text_min_length': 2,        # 查询文本最小长度
+    'sparse_vector_min_terms': 3,      # 稀疏向量最小术语数
+    
+    # 混合查询权重
+    'match_phrase_weight': 2.0,        # match_phrase权重
+    'terms_weight': 1.0,               # terms权重
+    
+    # 模糊匹配过滤配置（DeepSeek建议）
+    'fuzzy_filters': [
+        {"min_term_freq": 0.01},       # 保护低频专有名词（如"艾达灵族"）
+        {"max_doc_freq": 0.5}          # 忽略高频通用词（如"单位"、"技能"）
+    ],
+    
+    # 词频过滤阈值
+    'term_frequency_thresholds': {
+        'min_term_freq': 0.01,         # 最小词频，保护专有名词
+        'max_doc_freq': 0.5,           # 最大文档频率，过滤高频词
+        'min_word_length': 2,          # 最小词长度
+        'max_word_length': 20          # 最大词长度
+    }
+}
+
+# 不同查询类型的策略偏好
+QUERY_TYPE_STRATEGY_PREFERENCE = {
+    'fact': 'match_phrase',      # 事实查询偏好match_phrase
+    'list': 'hybrid',           # 列举查询使用混合策略
+    'compare': 'match_phrase',   # 比较查询偏好match_phrase
+    'rule': 'terms',            # 规则查询偏好terms
+    'semantic': 'match_phrase',  # 语义查询偏好match_phrase
+}
+
+# ========== 混合搜索优化配置 ==========
+# 标题权重配置
+HEADING_WEIGHTS = {
+    'h1': 1.0,
+    'h2': 1.4,
+    'h3': 1.8,
+    'h4': 1.0,
+    'h5': 0.8,
+    'h6': 0.6
+}
+
+# 内容类型权重配置
+CONTENT_TYPE_WEIGHTS = {
+    'corerule': 1.5,
+    'unit_data': 1.3,
+}
+
+# 查询长度阈值配置
+QUERY_LENGTH_THRESHOLDS = {
+    'short': 4,
+    'medium': 8
+}
+
+# 正文权重配置
+BOOST_WEIGHTS = {
+    'long_query': 1.4,    # 长查询权重
+    'medium_query': 1.2,  # 中等查询权重
+    'short_query': 0.8    # 短查询权重
+}
 
 # rerank 模型
 RERANK_MODEL = "bge-reranker-v2-m3"  # 默认重排序模型
 ALIYUN_RERANK_MODEL = "gte-rerank-v2"  # 阿里云重排序模型
-RERANK_TOPK = 20  # 重排序返回结果数量
+RERANK_TOPK = 25  # 重排序返回结果数量
 
 # BM25相关配置
 BM25_K1 = 1.5  # BM25算法k1参数，控制词频饱和速度
+
+# ========== 缓存配置 ==========
+ENABLE_PIPELINE_CACHE = False   # 是否启用Pipeline缓存，线下开发时关闭，线上服务时打开
 BM25_B = 0.75  # BM25算法b参数，控制文档长度归一化程度
 BM25_MIN_FREQ = 3  # 最小词频，低于此值的词会被过滤
 BM25_MAX_VOCAB_SIZE = 4000  # 最大词汇表大小

@@ -243,13 +243,6 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             logger.error(f"获取embedding失败: {str(e)}")
             raise
         
-        # 生成sparse向量（如失败降级dense）
-        try:
-            sparse_vector = self._generate_sparse_vector(query_text)
-        except Exception as e:
-            logger.warning(f"sparse向量生成失败，降级为dense检索: {str(e)}")
-            return self._fallback_to_dense(query_text, top_k, filter_dict, db_conn, embedding_model)
-        
         # 执行hybrid搜索（如失败降级dense）
         try:
             if db_conn and hasattr(db_conn, 'hybrid_search'):
@@ -263,15 +256,8 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
                     vector_weight=1.0 - alpha
                 )
                 
-                # 添加调试日志，了解返回数据的结构
-                logger.debug(f"Pipeline混合搜索 - OpenSearch 返回的原始数据: {response}")
-                logger.debug(f"Pipeline混合搜索 - 数据类型: {type(response)}")
-                logger.debug(f"Pipeline混合搜索 - 数据键: {list(response.keys()) if isinstance(response, dict) else 'Not a dict'}")
-                
                 if isinstance(response, dict) and 'hits' in response:
                     hits = response['hits']
-                    logger.debug(f"Pipeline混合搜索 - hits 字段: {hits}")
-                    logger.debug(f"Pipeline混合搜索 - hits 类型: {type(hits)}")
                     if isinstance(hits, dict) and 'hits' in hits:
                         actual_hits = hits['hits']
                         logger.debug(f"Pipeline混合搜索 - 实际结果数量: {len(actual_hits) if isinstance(actual_hits, list) else 'Not a list'}")
@@ -389,3 +375,153 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             formatted_results.append(formatted_result)
         
         return formatted_results
+
+    # ========== 混合搜索优化方法骨架 ==========
+    
+    def _build_heading_query(self, query: str) -> dict:
+        """构建层级标题查询，权重递减"""
+        from config import HEADING_WEIGHTS
+        
+        # 使用配置权重，动态构建字段列表
+        fields = [
+            f"{field}^{weight}" 
+            for field, weight in HEADING_WEIGHTS.items()
+        ]
+        
+        return {
+            "multi_match": {
+                "query": query,
+                "fields": fields,
+                "type": "best_fields",
+                "tie_breaker": 0.3
+            }
+        }
+    
+    def _calculate_content_boost(self, query: str) -> float:
+        """根据查询特性动态计算正文权重（带边界检查）"""
+        from config import QUERY_LENGTH_THRESHOLDS, BOOST_WEIGHTS
+        
+        query_length = len(query.split())
+        
+        # 获取阈值配置（带默认值）
+        short_threshold = QUERY_LENGTH_THRESHOLDS.get('short', 4)
+        long_threshold = QUERY_LENGTH_THRESHOLDS.get('medium', 8)
+        
+        # 长查询/详细描述 - 提高正文权重
+        if query_length > long_threshold:
+            return BOOST_WEIGHTS.get('long_query', 1.4)
+        
+        # 中等长度查询
+        elif query_length > short_threshold:
+            return BOOST_WEIGHTS.get('medium_query', 1.2)
+        
+        # 短查询/关键词 - 降低正文权重，侧重标题
+        else:
+            return BOOST_WEIGHTS.get('short_query', 0.8)
+    
+    def _build_content_query(self, query: str) -> dict:
+        """构建正文字段查询"""
+        return {
+            "match": {
+                "text": {
+                    "query": query,
+                    "boost": self._calculate_content_boost(query),
+                    "operator": "or"
+                }
+            }
+        }
+    
+    def _build_metadata_query(self, query: str) -> dict:
+        """构建元数据字段查询"""
+        return {
+            "multi_match": {
+                "query": query,
+                "fields": [
+                    "section_heading^1.5",    # 章节标题
+                    "content_type^1.3",       # 内容类型
+                    "chunk_type^1.2",         # 块类型
+                    "faction^1.0"             # 阵营
+                ],
+                "type": "best_fields"
+            }
+        }
+    
+    def _build_content_type_filter(self, query: str) -> dict:
+        """根据查询内容智能添加内容类型过滤"""
+        # 规则相关查询
+        if any(word in query for word in ["规则", "规则书", "codex", "FAQ"]):
+            return {"content_type": "corerule"}
+        
+        # 单位相关查询
+        elif any(word in query for word in ["单位", "模型", "unit", "数据表"]):
+            return {"chunk_type": "unit_data"}
+        
+        # 背景相关查询
+        elif any(word in query for word in ["背景", "故事", "lore", "历史"]):
+            return {"content_type": "background"}
+        
+        return {}
+    
+    def _build_hybrid_query_optimized(self, query: str, query_vector: list, 
+                                     filter: dict = None, top_k: int = 20) -> dict:
+        """构建优化后的混合搜索查询"""
+        
+        # 1. 层级标题查询
+        heading_query = self._build_heading_query(query)
+        
+        # 2. 正文字段查询
+        content_query = self._build_content_query(query)
+        
+        # 3. 元数据查询
+        metadata_query = self._build_metadata_query(query)
+        
+        # 4. 向量搜索
+        knn_query = {
+            "knn": {
+                "embedding": {
+                    "vector": query_vector,
+                    "k": min(100, top_k * 3),  # 扩大召回池
+                    "boost": 1.0
+                }
+            }
+            }
+        
+        # 5. 组合查询
+        hybrid_query = {
+            "hybrid": {
+                "queries": [
+                    heading_query,      # 层级标题
+                    content_query,      # 正文内容
+                    metadata_query,     # 元数据
+                    knn_query          # 向量搜索
+                ]
+            }
+        }
+        
+        # 6. 智能过滤（不覆盖用户显式设置的过滤条件）
+        if filter:
+            smart_filter = self._build_content_type_filter(query)
+            if smart_filter:
+                # 只添加用户未指定的过滤条件，避免覆盖用户设置
+                for key, value in smart_filter.items():
+                    if key not in filter:
+                        filter[key] = value
+            
+            # 构建过滤条件（简化版本，直接使用 term 查询）
+            filter_queries = []
+            for field, value in filter.items():
+                if isinstance(value, str):
+                    filter_queries.append({"term": {field: value}})
+                elif isinstance(value, list):
+                    filter_queries.append({"terms": {field: value}})
+            
+            if filter_queries:
+                hybrid_query["hybrid"]["filter"] = filter_queries
+        
+        return {
+            "size": top_k,
+            "query": {
+                "hybrid": hybrid_query["hybrid"]  # 正确提取 hybrid 对象
+            }
+        }
+    

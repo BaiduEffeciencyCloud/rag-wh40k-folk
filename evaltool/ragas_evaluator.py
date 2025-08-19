@@ -17,13 +17,14 @@ import logging
 # 添加项目根目录到路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import OPENAI_API_KEY, get_embedding_model, EMBADDING_MODEL
+from config import OPENAI_API_KEY, get_embedding_model, EMBADDING_MODEL, DEFAULT_TEMPERATURE, MAX_ANSWER_TOKENS
 # from vector_search import VectorSearch  # 移除vector_search依赖
 from orchestrator.processor import RAGOrchestrator
 from qProcessor.processorfactory import QueryProcessorFactory
 from searchengine.search_factory import SearchEngineFactory
 from aAggregation.aggfactory import AggFactory
 from postsearch.factory import PostSearchFactory
+from utils.llm_utils import call_llm
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -431,16 +432,10 @@ class RAGASEvaluator:
 """
             
             # 5. 调用LLM
-            from utils.llm_utils import call_llm
-            from openai import OpenAI
-            from config import OPENAI_API_KEY
-            
-            client = OpenAI(api_key=OPENAI_API_KEY)
             return call_llm(
-                client=client,
                 prompt=prompt,
-                temperature=0.3,
-                max_tokens=2000
+                temperature=DEFAULT_TEMPERATURE,
+                max_tokens=MAX_ANSWER_TOKENS
             )
             
         except Exception as e:

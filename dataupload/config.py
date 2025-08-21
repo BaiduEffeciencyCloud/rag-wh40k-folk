@@ -59,9 +59,7 @@ phrase_weight_scorer = PhraseWeightScorer(
 LOGICAL_BLOCK_CONFIG = {
     # 模糊匹配的关键词列表
     "boundary_keywords": [
-        "关键词",
-        "技能", 
-        "单位装备"
+        "关键词"
     ]
 }
 

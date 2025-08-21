@@ -198,7 +198,7 @@ class OpenSearchConnection(ConnectionInterface):
             self.logger.error(error_msg)
             raise Exception(error_msg)
         
-    def hybrid_search(self, query: str, filter: dict = None, top_k: int = 20, **kwargs) -> dict:
+    def hybrid_search(self, query: str, filter: dict = None, top_k: int = 20, rerank: bool = False, **kwargs) -> dict:
         """
         执行混合搜索的统一接口
         
@@ -206,13 +206,14 @@ class OpenSearchConnection(ConnectionInterface):
             query: 查询文本
             filter: 过滤条件
             top_k: 返回结果数量
+            rerank: 是否启用rerank，默认False
             **kwargs: 其他参数
                 - 对于 pipeline: query_vector, bm25_weight, vector_weight
                 - 对于 rrf: sparse_vector, dense_vector, rrf_params
                 - algorithm: 可选，指定算法类型，如果不指定则使用配置默认值
                 
         Returns:
-            dict: 原始的 OpenSearch hits 字典
+            dict: 原始的 OpenSearch hits 字典，如果启用rerank则返回rerank后的结果
         """
         try:
             # 优先使用传入的算法参数，如果没有则使用配置默认值
@@ -256,9 +257,25 @@ class OpenSearchConnection(ConnectionInterface):
                 )
             else:
                 raise ValueError(f"不支持的混合搜索算法: {algorithm}")
-                
-            # 直接返回原始 hits，不进行格式转换
-            return response
+            
+            # 如果启用rerank，对结果进行rerank处理
+            if rerank:
+                try:
+                    # 将OpenSearch响应转换为rerank期望的格式
+                    candidates = self._convert_response_to_rerank_candidates(response)
+                    if candidates:
+                        rerank_results = self.rerank(query, candidates, top_k)
+                        # 将rerank结果转换回OpenSearch格式
+                        return self._convert_rerank_results_to_opensearch_format(rerank_results, response)
+                    else:
+                        self.logger.warning("没有有效的候选文档进行rerank，返回原始结果")
+                        return response
+                except Exception as e:
+                    self.logger.warning(f"Rerank执行失败: {str(e)}，返回原始结果")
+                    return response
+            else:
+                # 直接返回原始 hits，不进行格式转换
+                return response
             
         except Exception as e:
             self.logger.error(f"Hybrid搜索失败: {str(e)}")
@@ -288,7 +305,6 @@ class OpenSearchConnection(ConnectionInterface):
                     'text': hit['_source'].get('text', ''),
                     'faction': hit['_source'].get('faction', ''),
                     'content_type': hit['_source'].get('content_type', ''),
-                    'search_type': 'hybrid',
                     'query': ''  # 移除对response.get('query', '')的依赖
                 }
                 results.append(result)
@@ -298,6 +314,85 @@ class OpenSearchConnection(ConnectionInterface):
         
         self.logger.debug(f"Returning {len(results)} results")
         return results
+
+    def _convert_response_to_rerank_candidates(self, response: dict) -> List[Dict]:
+        """
+        将OpenSearch响应转换为rerank期望的候选文档格式
+        
+        Args:
+            response: OpenSearch返回的响应
+            
+        Returns:
+            List[Dict]: rerank期望的候选文档格式
+        """
+        candidates = []
+        
+        self.logger.debug(f"Converting response to rerank candidates, response keys: {list(response.keys())}")
+        
+        if 'hits' in response and 'hits' in response['hits']:
+            hits_count = len(response['hits']['hits'])
+            self.logger.debug(f"Found {hits_count} hits in response")
+            
+            for i, hit in enumerate(response['hits']['hits']):
+                self.logger.debug(f"Processing hit {i}: _id={hit.get('_id')}, _score={hit.get('_score')}")
+                self.logger.debug(f"Hit _source keys: {list(hit['_source'].keys())}")
+                
+                text = hit['_source'].get('text', '')
+                if not text:
+                    self.logger.warning(f"Hit {i} has empty text field, skipping")
+                    continue
+                
+                candidate = {
+                    'text': text,
+                    'score': hit['_score'],
+                    'id': hit['_id'],
+                    'faction': hit['_source'].get('faction', ''),
+                    'content_type': hit['_source'].get('content_type', ''),
+                    'section_heading': hit['_source'].get('section_heading', ''),
+                    'source_file': hit['_source'].get('source_file', ''),
+                    'chunk_index': hit['_source'].get('chunk_index', 0)
+                }
+                candidates.append(candidate)
+                self.logger.debug(f"Added candidate {i}: id={candidate['id']}, text_length={len(candidate['text'])}")
+        else:
+            self.logger.warning("No hits found in response structure")
+        
+        self.logger.info(f"Converted {len(candidates)} candidates for rerank")
+        return candidates
+
+    def _convert_rerank_results_to_opensearch_format(self, rerank_results: List[Dict], original_response: dict) -> dict:
+        """
+        将rerank结果转换回OpenSearch格式
+        
+        Args:
+            rerank_results: rerank返回的结果列表
+            original_response: 原始的OpenSearch响应
+            
+        Returns:
+            dict: 转换后的OpenSearch格式响应
+        """
+        if not rerank_results:
+            return original_response
+        
+        # 获取原始hits列表
+        original_hits = original_response.get('hits', {}).get('hits', [])
+        
+        # 根据rerank结果的index重新排序hits
+        reranked_hits = []
+        for rerank_result in rerank_results:
+            index = rerank_result.get('index', 0)
+            if index < len(original_hits):
+                # 更新score为rerank的score
+                hit = original_hits[index].copy()
+                hit['_score'] = rerank_result.get('score', hit['_score'])
+                reranked_hits.append(hit)
+        
+        # 构建新的响应
+        new_response = original_response.copy()
+        new_response['hits']['hits'] = reranked_hits
+        new_response['hits']['total']['value'] = len(reranked_hits)
+        
+        return new_response
         
     def hybrid_search_pipeline(self, query: str, query_vector: list, filter: dict = None, top_k: int = 20, 
                      bm25_weight: float = 0.7, vector_weight: float = 0.3) -> dict:
@@ -353,7 +448,7 @@ class OpenSearchConnection(ConnectionInterface):
             self.logger.debug(f"hits 类型: {type(hits)}")
             
             self.logger.info(f"Hybrid搜索完成，查询: {query}，返回 {hits.get('total', {}).get('value', 0)} 个结果")
-            return hits
+            return response
             
         except Exception as e:
             self.logger.error(f"Hybrid搜索失败: {str(e)}")

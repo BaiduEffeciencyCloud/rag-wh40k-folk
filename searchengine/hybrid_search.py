@@ -92,7 +92,7 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
         Args:
             query: 查询（字符串或结构化查询对象）
             top_k: 返回结果数量
-            **kwargs: 其他参数（如filter、alpha、db_conn、embedding_model等）
+            **kwargs: 其他参数（如filter、alpha、db_conn、embedding_model、rerank等）
         Returns:
             搜索结果列表
         """
@@ -113,6 +113,7 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
         alpha = kwargs.get('alpha', HYBRID_ALPHA)
         db_conn = kwargs.get('db_conn')
         embedding_model = kwargs.get('embedding_model')
+        rerank = kwargs.get('rerank', True)  # 添加rerank参数支持
         
         # 根据配置选择算法
         algorithm = kwargs.get('algorithm', HYBRID_ALGORITHM)
@@ -120,10 +121,20 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
         try:
             if algorithm == 'rrf':
                 # 使用RRF算法
-                return self._search_with_rrf(query_text, filter_dict, top_k, alpha, db_conn, embedding_model)
+                results = self._search_with_rrf(query_text, filter_dict, top_k, alpha, db_conn, embedding_model, rerank=rerank)
             else:
                 # 使用现有pipeline算法（默认）
-                return self._search_with_pipeline(query_text, filter_dict, top_k, alpha, db_conn, embedding_model)
+                results = self._search_with_pipeline(query_text, filter_dict, top_k, alpha, db_conn, embedding_model, rerank=rerank)
+            
+            # 格式化结果，保持search_type为'hybrid'供后续模块使用
+            final_results = self._format_without_rerank(results, query_text, 'hybrid')
+            
+            if rerank:
+                logger.info(f"Hybrid搜索完成（启用rerank），查询: {query_text[:50]}...，返回 {len(final_results)} 个结果")
+            else:
+                logger.info(f"Hybrid搜索完成（跳过rerank），查询: {query_text[:50]}...，返回 {len(final_results)} 个结果")
+            
+            return final_results
                 
         except Exception as e:
             # 检查是否是核心功能失败（如embedding生成失败）
@@ -171,7 +182,7 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             logger.error(f"Dense检索降级失败: {str(e)}")
             return []
     
-    def _search_with_rrf(self, query_text: str, filter_dict: dict, top_k: int, alpha: float, db_conn, embedding_model) -> List[Dict[str, Any]]:
+    def _search_with_rrf(self, query_text: str, filter_dict: dict, top_k: int, alpha: float, db_conn, embedding_model, rerank: bool = False) -> List[Dict[str, Any]]:
         """
         使用RRF算法执行混合搜索
         """
@@ -200,6 +211,8 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
                     query=query_text,
                     filter=filter_dict,
                     top_k=top_k,
+                    rerank=rerank,
+                    algorithm='rrf',
                     sparse_vector=sparse_vector,
                     dense_vector=query_embedding,
                     rrf_params=rrf_params
@@ -235,7 +248,7 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             logger.warning(f"RRF混合检索失败: {str(e)}，降级为dense检索")
             return self._fallback_to_dense(query_text, top_k, filter_dict, db_conn, embedding_model)
     
-    def _search_with_pipeline(self, query_text: str, filter_dict: dict, top_k: int, alpha: float, db_conn, embedding_model) -> List[Dict[str, Any]]:
+    def _search_with_pipeline(self, query_text: str, filter_dict: dict, top_k: int, alpha: float, db_conn, embedding_model, rerank: bool = False) -> List[Dict[str, Any]]:
         """
         使用现有pipeline算法执行混合搜索
         """
@@ -254,6 +267,8 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
                     query=query_text,
                     filter=filter_dict,
                     top_k=top_k,
+                    rerank=rerank,
+                    algorithm='pipeline',
                     query_vector=query_embedding,
                     bm25_weight=alpha,
                     vector_weight=1.0 - alpha
@@ -381,6 +396,51 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             formatted_results.append(formatted_result)
         
         return formatted_results
+
+    def _format_without_rerank(self, formatted_results: List[Dict], query_text: str, search_engine: str) -> List[Dict]:
+        """
+        跳过rerank时，将formatted_results转换为与composite一致的格式
+        
+        Args:
+            formatted_results: _format_hybrid_result方法返回的结果
+            query_text: 查询文本
+            search_engine: 搜索引擎类型
+            
+        Returns:
+            List[Dict]: 与composite格式一致的结果列表
+        """
+        results = []
+        for i, item in enumerate(formatted_results):
+            result = {
+                'id': item.get('id', i),  # 使用原始ID或索引
+                'text': item.get('text', ''),
+                'score': item.get('score', 0.0),  # 保持原始向量分数
+                'query': query_text,
+                # 保留重要元数据，确保postsearch模块能正常处理
+                'faction': item.get('faction', ''),
+                'content_type': item.get('content_type', ''),
+                'section_heading': item.get('section_heading', ''),
+                'source_file': item.get('source_file', ''),
+                'chunk_index': item.get('chunk_index', 0)
+            }
+            results.append(result)
+        
+        return results
+    
+    def _format_with_rerank(self, rerank_results: any, query_text: str, search_engine: str) -> List[Dict]:
+        """
+        使用rerank结果，转换为标准格式
+        
+        Args:
+            rerank_results: rerank API返回的结果
+            query_text: 查询文本
+            search_engine: 搜索引擎类型
+            
+        Returns:
+            List[Dict]: 标准格式的结果列表
+        """
+        # 复用基类的composite方法
+        return self.composite(rerank_results, query_text, search_engine)
 
     # ========== 混合搜索优化方法骨架 ==========
     

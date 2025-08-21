@@ -5,11 +5,12 @@ Langchain LLM包装器
 将我们的LLM工厂包装为Langchain兼容的LLM接口
 """
 
+import json
 from typing import Any, List, Optional, Dict
 from langchain.llms.base import LLM
 from langchain.callbacks.manager import CallbackManagerForLLMRun
 from .llm_factory import LLMFactory
-
+           
 
 class LangchainLLMWrapper(LLM):
     """将我们的LLM工厂包装为Langchain兼容的LLM"""
@@ -39,15 +40,30 @@ class LangchainLLMWrapper(LLM):
     
     def _fix_json_format(self, response: str) -> str:
         """修复JSON格式问题"""
-        if response.startswith('{"text":') and 'statements' in response:
-            try:
-                import json
-                parsed = json.loads(response)
-                if 'text' in parsed:
-                    return parsed['text']
-            except Exception as e:
-                # 如果JSON解析失败，返回原始响应
-                pass
+        try:
+            parsed = json.loads(response)
+            
+            # 处理 {"text": ...} 格式
+            if 'text' in parsed:
+                return parsed['text']
+            
+            # 处理 {"statements": [...]} 格式（DeepSeek特有）
+            if 'statements' in parsed and isinstance(parsed['statements'], list):
+                return '\n'.join(parsed['statements'])
+            
+            # 处理其他可能的JSON格式
+            if isinstance(parsed, dict):
+                # 如果是字典，尝试提取第一个字符串值
+                for key, value in parsed.items():
+                    if isinstance(value, str):
+                        return value
+                    elif isinstance(value, list) and value and isinstance(value[0], str):
+                        return '\n'.join(value)
+            
+        except Exception as e:
+            # 如果JSON解析失败，返回原始响应
+            pass
+        
         return response
     
     @property

@@ -86,9 +86,6 @@ class DeepSeekLLM(LLMInterface):
         
         # 发送请求
         response = self.client.chat.completions.create(**request_params)
-        
-        logger.info(f"DeepSeek响应: {response}")
-        
         # 返回响应内容
         return response.choices[0].message.content.strip()
     

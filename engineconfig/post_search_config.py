@@ -17,42 +17,53 @@ POST_SEARCH_STRATEGIES = {
 
 
 PROCESSOR_CONFIGS = {
-    '''
-    'rerank': {
-        'enabled': True,
-        'model': RERANK_MODEL,  # 重排序模型
-        'top_k': 16,  # 重排序后保留的结果数量
-        'threshold': 0.5,  # 相关性阈值
-        'batch_size': 32,  # 批处理大小
-    },
-    '''
     'mmr': {
         'enabled': True,
-        'lambda_param': 0.8,  # MMR参数，平衡相关性和多样性 (0=纯多样性, 1=纯相关性)
-        'select_n': 20,       # 最终选择的文档数量
+        'lambda_param': 0.6,  # MMR参数，平衡相关性和多样性的平衡 (0=纯多样性, 1=纯相关性)
+        'select_n': 25,       # 最终选择的文档数量
         'enable_mmr': True,   # 是否启用MMR处理
         'min_text_length': 10, # 处理的最小文本长度
         
-        # 新增优化参数
-        'cache_max_similarity': True,  # 是否缓存最大相似度值
-        'relevance_threshold': 0.6,    # 相关性阈值，低于此值的结果被过滤
-        'enable_relevance_filter': False,  # 是否启用相关性过滤
-        'output_order': 'mmr_score',   # 输出排序方式 ('mmr_score', 'original', 'relevance')
+        # 相关性过滤参数（实际使用）
+        'relevance_threshold': 0.2,    # 相关性阈值，低于此值的结果被过滤
+        'enable_relevance_filter': True,  # 是否启用相关性过滤
+        
+        # Score标准化参数（实际使用）
+        'enable_score_normalization': True,  # 是否启用score标准化
+        'default_normalized_score': 0.5,    # 标准化时的默认分数
+        'normalization_method': 'log_minmax',  # 标准化方法
+        
+        # 输出排序参数（实际使用）
+        'output_order': 'mmr_score',   # 输出排序方式
         'reverse_order': False,        # 是否逆序排列
-        'fallback_strategy': 'original',  # embedding不可用时的降级策略 ('skip', 'random', 'original')
-        'embedding_timeout': 5.0,      # embedding获取超时时间（秒）
-        'enable_vectorized_mmr': True, # 是否启用向量化MMR算法
-        'batch_size': 32,              # 批处理大小
-        'use_parallel': False,         # 是否使用并行计算
-        'max_iterations': 100,         # 最大迭代次数，防止无限循环
-        'early_stopping': True,        # 是否启用早停机制
-        'diversity_boost': 1.0,        # 多样性提升因子
-        'zero_vector_protection': True, # 是否启用零向量保护
-        'zero_vector_strategy': 'return_zero',  # 零向量处理策略 ('return_zero', 'return_unit', 'skip', 'log_only')
-        'min_norm_threshold': 1e-8,     # 最小范数阈值，低于此值视为零向量
+        
+        # MMR算法优化参数（实际使用）
+        'max_candidates': 200,  # 进入MMR的最大候选文档数量
+        'dynamic_lambda': True,  # 是否启用动态λ调整
+        'use_optimized_mmr': True,  # 是否使用优化的MMR算法
+        'base_lambda': 0.5,        # 动态λ调整的基础值
+        'short_query_threshold': 13,  # 短查询长度阈值
+        'medium_query_threshold': 25, # 中等查询长度阈值
+        
+        # 动态lambda调整参数（新增）
+        'short_adjustment': 0.3,        # 短查询调整值
+        'long_adjustment': 0.2,         # 长查询调整值
+        'max_lambda': 0.9,              # lambda最大值
+        'min_lambda': 0.3,              # lambda最小值
+        
+        # 零向量保护参数（实际使用）
+        'zero_vector_protection': True,  # 是否启用零向量保护
+        'zero_vector_strategy': 'return_zero',  # 零向量处理策略
+        'min_norm_threshold': 1e-8,     # 最小范数阈值
+        
+        # 缓存优化参数（实际使用）
         'use_cache_optimization': True,  # 是否使用缓存优化的MMR算法
-        'output_order': 'mmr_score',     # 输出排序方式 ('mmr_score', 'relevance', 'diversity')
-        'reverse_order': False,          # 是否逆序排列
+        
+        # 回退机制参数（实际使用）
+        'fallback_levels': 3,  # 多级回退的级别数量
+        'fallback_strategy': 'multi_level',  # 回退策略
+        'min_results_threshold': 3,  # 最小结果数量阈值
+        'enable_fallback_monitoring': True,  # 是否启用回退监控
     },
     'filter': {
         'enabled': True,

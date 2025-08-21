@@ -55,6 +55,16 @@ phrase_weight_scorer = PhraseWeightScorer(
     boost_factors=(0.2, 0.1, 0.0, -0.5)
 )  # 重复：config.py phrase_weight_scorer
 
+# ==================== 逻辑语义块分割配置（新增） ====================
+LOGICAL_BLOCK_CONFIG = {
+    # 模糊匹配的关键词列表
+    "boundary_keywords": [
+        "关键词",
+        "技能", 
+        "单位装备"
+    ]
+}
+
 # ==================== 专业术语词典配置（新增） ====================
 WH40K_VOCAB_PATH = os.getenv('WH40K_VOCAB_PATH', 'dict/wh40k_vocabulary/')
 
@@ -123,6 +133,7 @@ WH40K_CONFIG = {
     "category_weights": CATEGORY_WEIGHTS,
     "whitelist_generation": WHITELIST_GENERATION_CONFIG,
     "synonym_expansion": SYNONYM_EXPANSION_CONFIG,
+    "logical_block": LOGICAL_BLOCK_CONFIG,  # 新增：逻辑语义块分割配置
     "data_upload": DATA_UPLOAD_CONFIG,
     "bm25": BM25_CONFIG,
     "vector_upload": VECTOR_UPLOAD_CONFIG,

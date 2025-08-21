@@ -227,7 +227,7 @@ BOOST_WEIGHTS = {
 # rerank 模型
 RERANK_MODEL = "bge-reranker-v2-m3"  # 默认重排序模型
 ALIYUN_RERANK_MODEL = "gte-rerank-v2"  # 阿里云重排序模型
-RERANK_TOPK = 30  # 重排序返回结果数量
+RERANK_TOPK = 25  # 重排序返回结果数量
 
 # BM25相关配置
 BM25_K1 = 1.5  # BM25算法k1参数，控制词频饱和速度

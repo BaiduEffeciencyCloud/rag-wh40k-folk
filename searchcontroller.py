@@ -73,11 +73,12 @@ def main():
     db_type = args.db_type
     embedding_model=args.embedding_model
     rerank_enabled = args.rerank
+    top_k = args.topk
     # 4. 组装RAGOrchestrator（重构后不再传递db_type和embedding_model）
     orchestrator = RAGOrchestrator(query_processor, search_engine, postsearch, aggregator)
 
     # 5. 主流程统一调度（通过run方法传递db_type、embedding_model和rerank参数）
-    result = orchestrator.run(args.query, top_k=args.topk, db_type=db_type, embedding_model=embedding_model, rerank=rerank_enabled)
+    result = orchestrator.run(args.query, top_k=top_k, db_type=db_type, embedding_model=embedding_model, rerank=rerank_enabled)
 
     print_separator("Orchestrator 聚合结果")
     #print(json.dumps(result, ensure_ascii=False, indent=2))

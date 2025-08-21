@@ -196,10 +196,9 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
         results = []
         for i, item in enumerate(formatted_results):
             result = {
-                'doc_id': item.get('id', i),  # 使用原始ID或索引
+                'id': item.get('id', i),  # 使用原始ID或索引
                 'text': item.get('text', ''),
                 'score': item.get('score', 0.0),  # 保持原始向量分数
-                'search_type': search_engine,
                 'query': query_text,
                 # 保留重要元数据，确保postsearch模块能正常处理
                 'faction': item.get('faction', ''),

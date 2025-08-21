@@ -50,7 +50,6 @@ class BaseSearchEngine:
                 'doc_id': data["index"],
                 'text': text,
                 'score': data["score"],
-                'search_type': search_engine,
                 'query': query_text
             }
             results.append(result)
@@ -104,9 +103,9 @@ class BaseSearchEngine:
         # Score分析日志
         logger.info(f"🔍 {search_type} Score分析 - 范围: [{min_score:.4f}, {max_score:.4f}], 均值: {avg_score:.4f}")
         
-        # Score分布日志（前3个结果）
-        score_list = [f"{r.get('score', 0):.4f}" for r in results[:3]]
-        logger.info(f"🔍 {search_type} Score分布 - 前3个结果: {score_list}")
+        # Score分布日志（全部结果）
+        score_list = [f"{r.get('score', 0):.4f}" for r in results]
+        logger.info(f"🔍 {search_type} Score分布 - 全部结果: {score_list}")
         
         # 自动判断score类型并给出建议
         if 0 <= min_score <= max_score <= 1:

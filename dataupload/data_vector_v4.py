@@ -355,8 +355,8 @@ class SemanticDocumentChunker:
                 level = len(heading_match.group(1))
                 heading = heading_match.group(2).strip()
                 
-                # 保存前一个section
-                if current_section:
+                # 保存前一个section（只有当它有内容时才保存）
+                if current_section and current_section['content']:
                     sections.append(current_section)
                 
                 # 开始新section
@@ -371,8 +371,8 @@ class SemanticDocumentChunker:
                 if current_section:
                     current_section['content'].append(line)
         
-        # 保存最后一个section
-        if current_section:
+        # 保存最后一个section（只有当它有内容时才保存）
+        if current_section and current_section['content']:
             sections.append(current_section)
         
         return sections
@@ -435,6 +435,11 @@ class SemanticDocumentChunker:
             chunks列表
         """
         chunks = []
+        
+        # 如果content为空或只包含空白字符，不创建chunk
+        if not content or not content.strip():
+            return chunks
+            
         token_count = self._count_tokens(content)
         
         # 如果内容小于等于max_tokens，直接作为一个chunk
@@ -714,25 +719,26 @@ def main(test_file: str):
     optimized_chunks = chunker.optimize_chunks(chunks)
     print(f"优化后 {len(optimized_chunks)} 个切片")
     
-    # 显示前5个切片的metadata示例
-    print("\n=== 前5个切片的Metadata示例 ===")
-    for i, chunk in enumerate(optimized_chunks[:5]):
-        print(f"\n--- 切片 {i+1} ---")
-        print(f"Text: {chunk['text'][:100]}...")
-        
-        metadata = chunk.get('metadata', {})
-        print(f"                                ")
-        print(f"section_heading: {metadata.get('section_heading', '')}")
-        print(f"chunk_type: {metadata.get('chunk_type', '')}")
-        print(f"content_type: {metadata.get('content_type', '')}")
-        print(f"faction: {metadata.get('faction', '')}")
-        print(f"sub_section: {metadata.get('sub_section', '')}")
-        print(f"h1: {metadata.get('h1', '')}")
-        print(f"h2: {metadata.get('h2', '')}")
-        print(f"h3: {metadata.get('h3', '')}")
-        print(f"h4: {metadata.get('h4', '')}")
-        print(f"h5: {metadata.get('h5', '')}")
-        print(f"h6: {metadata.get('h6', '')}")
+    # 统计sub_section分布
+    print("\n=== sub_section分布统计 ===")
+    sub_section_counts = {}
+    for chunk in optimized_chunks:
+        sub_section = chunk.get('metadata', {}).get('sub_section', '')
+        if sub_section not in sub_section_counts:
+            sub_section_counts[sub_section] = 0
+        sub_section_counts[sub_section] += 1
+    
+    # 显示每个sub_section的数量
+    for sub_section, count in sub_section_counts.items():
+        print(f"  {sub_section}: {count}个")
+    
+    # 显示配置文件中的boundary_keywords
+    print(f"\n=== 配置文件中的boundary_keywords ===")
+    from dataupload.config import LOGICAL_BLOCK_CONFIG
+    boundary_keywords = LOGICAL_BLOCK_CONFIG.get('boundary_keywords', [])
+    for keyword in boundary_keywords:
+        count = sub_section_counts.get(keyword, 0)
+        print(f"  {keyword}: {count}个")
     
     # 保存结果
     import os

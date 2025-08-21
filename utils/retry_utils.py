@@ -11,10 +11,10 @@ import logging
 import functools
 from typing import Callable, Any, Optional
 from config import (
-    EMBEDDING_CONNECT_TIMEOUT, EMBEDDING_READ_TIMEOUT,
-    EMBEDDING_MAX_RETRIES, EMBEDDING_RETRY_DELAY,
-    EMBEDDING_USE_EXPONENTIAL_BACKOFF, EMBEDDING_BACKOFF_FACTOR,
-    EMBEDDING_MAX_BACKOFF_DELAY
+    CONNECT_TIMEOUT, READ_TIMEOUT,
+    MAX_RETRIES, RETRY_DELAY,
+    USE_EXPONENTIAL_BACKOFF, BACKOFF_FACTOR,
+    MAX_BACKOFF_DELAY
 )
 
 def api_retry_decorator(service_name: str = "API",
@@ -38,9 +38,9 @@ def api_retry_decorator(service_name: str = "API",
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
-            max_retries_actual = max_retries or EMBEDDING_MAX_RETRIES
-            retry_delay_actual = retry_delay or EMBEDDING_RETRY_DELAY
-            use_backoff_actual = use_backoff if use_backoff is not None else EMBEDDING_USE_EXPONENTIAL_BACKOFF
+            max_retries_actual = max_retries or MAX_RETRIES
+            retry_delay_actual = retry_delay or RETRY_DELAY
+            use_backoff_actual = use_backoff if use_backoff is not None else USE_EXPONENTIAL_BACKOFF
             
             last_exception = None
             
@@ -52,8 +52,8 @@ def api_retry_decorator(service_name: str = "API",
                     if attempt < max_retries_actual:
                         # 计算延迟时间
                         if use_backoff_actual:
-                            delay = min(retry_delay_actual * (EMBEDDING_BACKOFF_FACTOR ** attempt), 
-                                      EMBEDDING_MAX_BACKOFF_DELAY)
+                            delay = min(retry_delay_actual * (BACKOFF_FACTOR ** attempt), 
+                                      MAX_BACKOFF_DELAY)
                         else:
                             delay = retry_delay_actual
                         
@@ -90,18 +90,18 @@ def embedding_retry_decorator(max_retries: int = None,
     )
 
 def network_retry_decorator(service_name: str = "Network",
-                           max_retries: int = 3,
-                           retry_delay: float = 1.0,
-                           use_backoff: bool = True,
+                           max_retries: int = None,
+                           retry_delay: float = None,
+                           use_backoff: bool = None,
                            retry_on_exceptions: tuple = (Exception,)):
     """
     网络请求专用重试装饰器
     
     Args:
         service_name: 服务名称
-        max_retries: 最大重试次数
-        retry_delay: 重试延迟（秒）
-        use_backoff: 是否使用指数退避
+        max_retries: 最大重试次数，默认使用配置值
+        retry_delay: 重试延迟（秒），默认使用配置值
+        use_backoff: 是否使用指数退避，默认使用配置值
         retry_on_exceptions: 需要重试的异常类型
     
     Returns:
@@ -116,18 +116,18 @@ def network_retry_decorator(service_name: str = "Network",
     )
 
 def database_retry_decorator(service_name: str = "Database",
-                            max_retries: int = 3,
-                            retry_delay: float = 0.5,
-                            use_backoff: bool = True,
+                            max_retries: int = None,
+                            retry_delay: float = None,
+                            use_backoff: bool = None,
                             retry_on_exceptions: tuple = (Exception,)):
     """
     数据库操作专用重试装饰器
     
     Args:
         service_name: 服务名称
-        max_retries: 最大重试次数
-        retry_delay: 重试延迟（秒）
-        use_backoff: 是否使用指数退避
+        max_retries: 最大重试次数，默认使用配置值
+        retry_delay: 重试延迟（秒），默认使用配置值
+        use_backoff: 是否使用指数退避，默认使用配置值
         retry_on_exceptions: 需要重试的异常类型
     
     Returns:

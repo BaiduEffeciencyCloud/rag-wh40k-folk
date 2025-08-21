@@ -1,13 +1,14 @@
 import logging
-import requests
 from typing import Optional, Dict, Any, List, Union
+from openai import OpenAI
 from .llm_interface import LLMInterface
 from config import DEEPSEEK_API_KEY, DEEPSEEK_SERVER, DEEPSEEK_MODEL, DEFAULT_TEMPERATURE, MAX_ANSWER_TOKENS
+from utils.retry_utils import network_retry_decorator
 
 logger = logging.getLogger(__name__)
 
 class DeepSeekLLM(LLMInterface):
-    """DeepSeek LLM实现"""
+    """DeepSeek LLM实现 - 使用OpenAI客户端"""
     
     def __init__(self, api_key: str = None, default_model: str = None, base_url: str = None):
         """
@@ -24,7 +25,14 @@ class DeepSeekLLM(LLMInterface):
         
         if not self.api_key:
             logger.warning("DeepSeek API密钥未提供")
-        
+        else:
+            # 初始化OpenAI客户端
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url
+            )
+    
+    @network_retry_decorator(service_name="DeepSeek LLM")
     def call_llm(self, 
                  prompt: Union[str, List[Dict[str, str]]], 
                  temperature: float = DEFAULT_TEMPERATURE,
@@ -40,68 +48,49 @@ class DeepSeekLLM(LLMInterface):
             **kwargs: 其他DeepSeek API参数
             
         Returns:
-            str: LLM响应内容，失败时返回错误信息
+            str: LLM响应内容
+            
+        Raises:
+            ValueError: 参数错误
+            Exception: API调用错误
         """
-        try:
-            if not self.api_key:
-                return "抱歉，DeepSeek API密钥未提供"
-            
-            # 使用初始化时的默认模型
-            model_name = self.default_model
-            
-            # 处理不同的prompt格式
-            if isinstance(prompt, str):
-                # 字符串格式：直接作为user message
-                messages = [{"role": "user", "content": prompt}]
-            elif isinstance(prompt, list):
-                # 列表格式：完整的messages
-                messages = prompt
-            else:
-                raise ValueError("prompt必须是字符串或消息列表")
-            
-            # 构建请求数据
-            request_data = {
-                "model": model_name,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens
-            }
-            
-            # 添加其他参数
-            request_data.update(kwargs)
-            
-            # 发送请求
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                },
-                json=request_data,
-                timeout=30
-            )
-            
-            # 检查响应状态
-            response.raise_for_status()
-            
-            # 解析响应
-            response_data = response.json()
-            logger.info(f"DeepSeek响应: {response_data}")
-            if 'choices' in response_data and len(response_data['choices']) > 0:
-                return response_data['choices'][0]['message']['content'].strip()
-            else:
-                logger.error(f"DeepSeek响应格式异常: {response_data}")
-                return "抱歉，DeepSeek响应格式异常"
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"DeepSeek API请求失败: {str(e)}")
-            return f"抱歉，DeepSeek API请求失败: {str(e)}"
-        except ValueError as e:
-            logger.error(f"DeepSeek参数错误: {str(e)}")
-            return f"抱歉，DeepSeek参数错误: {str(e)}"
-        except Exception as e:
-            logger.error(f"DeepSeek LLM调用失败: {str(e)}")
-            return f"抱歉，DeepSeek LLM调用时出错: {str(e)}"
+        if not self.api_key:
+            raise ValueError("DeepSeek API密钥未提供")
+        
+        if not hasattr(self, 'client'):
+            raise ValueError("DeepSeek客户端未初始化")
+        
+        # 使用初始化时的默认模型
+        model_name = self.default_model
+        
+        # 处理不同的prompt格式
+        if isinstance(prompt, str):
+            # 字符串格式：直接作为user message
+            messages = [{"role": "user", "content": prompt}]
+        elif isinstance(prompt, list):
+            # 列表格式：完整的messages
+            messages = prompt
+        else:
+            raise ValueError("prompt必须是字符串或消息列表")
+        
+        # 构建请求参数
+        request_params = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+        
+        # 添加其他参数
+        request_params.update(kwargs)
+        
+        # 发送请求
+        response = self.client.chat.completions.create(**request_params)
+        
+        logger.info(f"DeepSeek响应: {response}")
+        
+        # 返回响应内容
+        return response.choices[0].message.content.strip()
     
     def build_messages(self, 
                       system_prompt: Optional[str] = None, 

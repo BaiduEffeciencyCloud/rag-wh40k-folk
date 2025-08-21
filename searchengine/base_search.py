@@ -73,3 +73,48 @@ class BaseSearchEngine:
             return rerank_results
         except Exception as e:
             logger.error(f"Rerank 过程发生错误:{str(e)}")
+            return []
+    
+    def _log_score_analysis(self, results: List[Dict], search_type: str, query_text: str = None, **kwargs):
+        """
+        统一的score分析日志函数，可被所有搜索引擎复用
+        
+        Args:
+            results: 搜索结果列表
+            search_type: 搜索类型（如"Dense搜索"、"RRF混合搜索"、"Pipeline混合搜索"）
+            query_text: 查询文本（可选，用于输出基础信息）
+            **kwargs: 其他参数（如alpha等）
+        """
+        if not results:
+            logger.warning(f"{search_type} - 无结果返回")
+            return
+        
+        # 提取score信息
+        scores = [r.get('score', 0) for r in results]
+        min_score, max_score = min(scores), max(scores)
+        avg_score = sum(scores) / len(scores)
+        
+        # 构建基础日志信息（如果提供了query_text）
+        if query_text:
+            base_info = f"{search_type}完成，查询: {query_text[:50]}...，返回 {len(results)} 个结果"
+            if 'alpha' in kwargs:
+                base_info += f"，alpha: {kwargs['alpha']}"
+            logger.info(base_info)
+        
+        # Score分析日志
+        logger.info(f"🔍 {search_type} Score分析 - 范围: [{min_score:.4f}, {max_score:.4f}], 均值: {avg_score:.4f}")
+        
+        # Score分布日志（前3个结果）
+        score_list = [f"{r.get('score', 0):.4f}" for r in results[:3]]
+        logger.info(f"🔍 {search_type} Score分布 - 前3个结果: {score_list}")
+        
+        # 自动判断score类型并给出建议
+        if 0 <= min_score <= max_score <= 1:
+            logger.info(f"✅ {search_type} score在[0,1]范围内，可直接用于MMR相关性过滤")
+        elif -1 <= min_score <= max_score <= 1:
+            logger.info(f"✅ {search_type} score在[-1,1]范围内（cosine相似度），建议映射到[0,1]后用于MMR过滤")
+        elif max_score > 1.0 or min_score < -1.0:
+            logger.warning(f"⚠️  {search_type} score超出[-1,1]范围，可能影响MMR相关性过滤！")
+            logger.warning(f"⚠️  建议在MMR过滤前对score进行归一化处理")
+        else:
+            logger.warning(f"⚠️  {search_type} score范围异常: [{min_score:.4f}, {max_score:.4f}]")

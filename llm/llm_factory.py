@@ -35,7 +35,10 @@ class LLMFactory:
         if llm_type.lower() == "openai":
             return OpenAILLM(**kwargs)
         elif llm_type.lower() == "deepseek":
-            return DeepSeekLLM(**kwargs)
+            # DeepSeekLLM只接受api_key, default_model, base_url参数
+            deepseek_kwargs = {k: v for k, v in kwargs.items() 
+                             if k in ['api_key', 'default_model', 'base_url']}
+            return DeepSeekLLM(**deepseek_kwargs)
         elif llm_type.lower() == "gemini":
             return GeminiLLM(**kwargs)
         else:

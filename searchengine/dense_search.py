@@ -114,6 +114,9 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
                     logger.info(f"返回结果数量: {len(results)}")
                     logger.info(f"第一个结果格式: {list(results[0].keys()) if results[0] else 'None'}")
                     logger.info(f"第一个结果内容: {results[0] if results[0] else 'None'}")
+                    
+                    # 🔴 复用基类的score分析日志函数
+                    self._log_score_analysis(results, "Dense搜索")
                 else:
                     logger.warning("返回结果为空或None")
                 
@@ -139,7 +142,9 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
             "supports_hybrid": False,
             "embedding_model": EMBADDING_MODEL,
             "index_name": "dynamic"  # 动态数据库连接，不固定索引名
-        } 
+        }
+    
+    # 删除重复的_log_score_analysis方法，使用基类的方法 
 
     def format_result(self, opensearch_results: dict) -> list:
         """

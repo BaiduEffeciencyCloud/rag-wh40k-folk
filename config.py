@@ -77,38 +77,33 @@ if not all([NEO4J_TEST_URI, NEO4J_TEST_USERNAME, NEO4J_TEST_PASSWORD]):
     logger.warning("Neo4j test configuration incomplete. Please set NEO4J_TEST_URI, NEO4J_TEST_USERNAME, and NEO4J_TEST_PASSWORD in .env file")
 
 # 模型配置
-DEFAULT_TEMPERATURE = 0.3  # 默认温度参数，控制生成文本的随机性
-DEFAULT_TOP_K = 15  # 默认返回结果数量
+DEFAULT_TOP_K = 25  # 默认返回结果数量
 
-# query超时配置
-QUERY_TIMEOUT = 30  # 查询超时时间（秒）
 
 # 答案生成配置
-DEFAULT_TEMPERATURE = 0.3  # 默认温度参数，控制生成文本的随机性
+DEFAULT_TEMPERATURE = 0.2  # 默认温度参数，控制生成文本的随机性
 MAX_ANSWER_TOKENS = 2000  # 答案生成最大token数
 
 # 结果整合配置
 DEDUPLICATION_THRESHOLD = 0.8  # 去重阈值，相似度超过此值视为重复
 
 # 并发配置
-DEFAULT_MAX_WORKERS = 4  # 默认最大并发工作线程数
+DEFAULT_MAX_WORKERS = 4  # 默认RAGAS最大并发工作线程数
 
-# 答案生成配置
-MAX_CONTEXT_RESULTS = 20  # 答案生成时使用的最大上下文结果数
+
 
 
 
 # ========== 网络连接配置 ==========
-# Embedding模型专用配置
-EMBEDDING_CONNECT_TIMEOUT = 60  # Embedding连接超时（秒）
-EMBEDDING_READ_TIMEOUT = 120  # Embedding读取超时（秒）
-EMBEDDING_MAX_RETRIES = 3  # Embedding重试次数
-EMBEDDING_RETRY_DELAY = 2.0  # Embedding重试延迟（秒）
+CONNECT_TIMEOUT = 120  # 连接超时（秒）
+READ_TIMEOUT = 120  # 读取超时（秒）
+MAX_RETRIES = 4  # 重试次数
+RETRY_DELAY = 2.0  # 重试延迟（秒）
 
 # 指数退避配置
-EMBEDDING_USE_EXPONENTIAL_BACKOFF = True  # 是否使用指数退避策略
-EMBEDDING_BACKOFF_FACTOR = 2.0  # 退避因子
-EMBEDDING_MAX_BACKOFF_DELAY = 30.0  # 最大退避延迟（秒）
+USE_EXPONENTIAL_BACKOFF = True  # 是否使用指数退避策略
+BACKOFF_FACTOR = 2.0  # 退避因子
+MAX_BACKOFF_DELAY = 30.0  # 最大退避延迟（秒）
 
 # LLM类型,包括 Openai, Deepseek, Gemini
 LLM_TYPE="deepseek"
@@ -232,7 +227,7 @@ BOOST_WEIGHTS = {
 # rerank 模型
 RERANK_MODEL = "bge-reranker-v2-m3"  # 默认重排序模型
 ALIYUN_RERANK_MODEL = "gte-rerank-v2"  # 阿里云重排序模型
-RERANK_TOPK = 25  # 重排序返回结果数量
+RERANK_TOPK = 30  # 重排序返回结果数量
 
 # BM25相关配置
 BM25_K1 = 1.5  # BM25算法k1参数，控制词频饱和速度
@@ -271,29 +266,6 @@ phrase_weight_scorer = PhraseWeightScorer(
     pmi_threshold=3.0,
     boost_factors=(0.2, 0.1, 0.0, -0.5)
 )
-
-def get_embedding_model():
-    """
-    初始化并返回嵌入模型对象。
-    """
-    if not OPENAI_API_KEY:
-        logger.error("OpenAI API key not configured.")
-        raise ValueError("OpenAI API key is missing.")
-        
-    embeddings = OpenAIEmbeddings(
-        model=EMBADDING_MODEL,
-        openai_api_key=OPENAI_API_KEY,
-        dimensions=1024  # 强制指定输出维度为1024，与index一致
-    )
-    logger.info(f"Embedding model '{EMBADDING_MODEL}' initialized with dimensions=1024.")
-    # 增加shape打印，便于排查实际输出维度
-    try:
-        test_vec = embeddings.embed_query("test shape")
-        logger.info(f"[DEBUG] embedding shape: {len(test_vec)}")
-        print(f"[DEBUG] embedding shape: {len(test_vec)}")
-    except Exception as e:
-        logger.warning(f"[DEBUG] embedding shape 获取失败: {e}")
-    return embeddings
 
 # 日志配置
 LOG_FORMAT = os.getenv("LOG_FORMAT", '%(asctime)s - %(levelname)s - %(message)s')

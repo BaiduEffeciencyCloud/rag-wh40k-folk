@@ -82,7 +82,17 @@ class RAGOrchestrator:
             logger.info(f"PostSearch处理前，结果数量: {len(results) if results else 0}")
             if results and len(results) > 0:
                 logger.info(f"PostSearch处理前，第一个结果: {results[0]}")
-            results = self.post_search.process(results, embedding_model=embedding_instance)
+            
+            # 构建query_info，包含原始查询信息
+            query_info = {
+                'text': query,
+                'original_query': query,
+                'query': query
+            }
+            
+            results = self.post_search.process(results, 
+                                             embedding_model=embedding_instance,
+                                             query_info=query_info)
             logger.info(f"PostSearch处理后，结果数量: {len(results) if results else 0}")
             if results and len(results) > 0:
                 logger.info(f"PostSearch处理后，第一个结果: {results[0]}")

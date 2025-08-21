@@ -222,7 +222,10 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
                 
                 # 格式化结果
                 formatted_results = self._format_hybrid_result(response)
-                logger.info(f"RRF混合搜索完成，查询: {query_text[:50]}...，返回 {len(formatted_results)} 个结果")
+                
+                # 🔴 复用基类的score分析日志函数
+                self._log_score_analysis(formatted_results, "RRF混合搜索", query_text)
+                
                 return formatted_results
             else:
                 logger.warning("数据库连接不支持RRF混合搜索，降级为dense检索")
@@ -266,7 +269,10 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
                 
                 # 格式化结果
                 formatted_results = self._format_hybrid_result(response)
-                logger.info(f"Pipeline Hybrid检索完成，查询: {query_text[:50]}...，返回 {len(formatted_results)} 个结果，alpha: {alpha}")
+                
+                # 🔴 复用基类的score分析日志函数
+                self._log_score_analysis(formatted_results, "Pipeline混合搜索", query_text, alpha=alpha)
+                
                 return formatted_results
             else:
                 logger.warning("数据库连接不支持混合搜索，降级为dense检索")
@@ -396,6 +402,8 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
                 "tie_breaker": 0.3
             }
         }
+    
+    # 删除重复的_log_score_analysis方法，使用基类的方法
     
     def _calculate_content_boost(self, query: str) -> float:
         """根据查询特性动态计算正文权重（带边界检查）"""

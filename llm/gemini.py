@@ -2,6 +2,7 @@ import logging
 from typing import Optional, Dict, Any, List, Union
 from .llm_interface import LLMInterface
 from config import DEFAULT_TEMPERATURE, MAX_ANSWER_TOKENS
+from utils.retry_utils import network_retry_decorator
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,8 @@ class GeminiLLM(LLMInterface):
         self.api_key = api_key
         self.default_model = default_model or "gemini-pro"
         # TODO: 实现Gemini客户端初始化
-        
+    
+    @network_retry_decorator(service_name="Gemini LLM")
     def call_llm(self, 
                  prompt: Union[str, List[Dict[str, str]]], 
                  temperature: float = DEFAULT_TEMPERATURE,
@@ -35,16 +37,14 @@ class GeminiLLM(LLMInterface):
             **kwargs: 其他Gemini API参数
             
         Returns:
-            str: LLM响应内容，失败时返回错误信息
-        """
-        try:
-            # TODO: 实现Gemini API调用
-            logger.warning("Gemini LLM实现尚未完成，返回占位符响应")
-            return "Gemini LLM实现尚未完成"
+            str: LLM响应内容
             
-        except Exception as e:
-            logger.error(f"Gemini LLM调用失败: {str(e)}")
-            return f"抱歉，Gemini LLM调用时出错: {str(e)}"
+        Raises:
+            NotImplementedError: 功能尚未实现
+        """
+        # TODO: 实现Gemini API调用
+        logger.warning("Gemini LLM实现尚未完成，返回占位符响应")
+        raise NotImplementedError("Gemini LLM实现尚未完成")
     
     def build_messages(self, 
                       system_prompt: Optional[str] = None, 

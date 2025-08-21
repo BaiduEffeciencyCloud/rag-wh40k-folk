@@ -17,6 +17,7 @@ POST_SEARCH_STRATEGIES = {
 
 
 PROCESSOR_CONFIGS = {
+    '''
     'rerank': {
         'enabled': True,
         'model': RERANK_MODEL,  # 重排序模型
@@ -24,9 +25,10 @@ PROCESSOR_CONFIGS = {
         'threshold': 0.5,  # 相关性阈值
         'batch_size': 32,  # 批处理大小
     },
+    '''
     'mmr': {
         'enabled': True,
-        'lambda_param': 0.7,  # MMR参数，平衡相关性和多样性 (0=纯多样性, 1=纯相关性)
+        'lambda_param': 0.8,  # MMR参数，平衡相关性和多样性 (0=纯多样性, 1=纯相关性)
         'select_n': 20,       # 最终选择的文档数量
         'enable_mmr': True,   # 是否启用MMR处理
         'min_text_length': 10, # 处理的最小文本长度

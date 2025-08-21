@@ -99,7 +99,6 @@ class DedupAggregation(AggregationInterface):
                 system_prompt=system_prompt,
                 user_prompt=user_prompt
             )
-            logger.info(f"语义解析消息: {messages}")
             return call_llm(
                 prompt=messages,
                 temperature=DEFAULT_TEMPERATURE,

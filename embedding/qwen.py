@@ -2,7 +2,7 @@ from typing import List
 import dashscope
 from dashscope.embeddings import TextEmbedding
 from .eminterface import EmbeddingInterface
-from config import QWEN_DIMENSION, EMBEDDING_CONNECT_TIMEOUT, EMBEDDING_READ_TIMEOUT
+from config import QWEN_DIMENSION, CONNECT_TIMEOUT, READ_TIMEOUT
 from utils.retry_utils import embedding_retry_decorator
 
 class QwenEmbedding(EmbeddingInterface):

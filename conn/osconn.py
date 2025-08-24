@@ -16,7 +16,8 @@ import dashscope
 from http import HTTPStatus
 from config import PIPELINE_BM25_BOOST, PIPELINE_VECTOR_BOOST, HYBRID_ALPHA
 from config import QUERY_LENGTH_THRESHOLDS, BOOST_WEIGHTS, MATCH_PHRASE_CONFIG, HEADING_WEIGHTS, ENABLE_PIPELINE_CACHE
-from config import SEARCH_FIELD_WEIGHTS
+from config import SEARCH_FIELD_WEIGHTS, DEBUG_ANALYZE, SEARCH_ANALYSIS_LOG_FILE, SEARCH_ANALYSIS_LOG_MAX_SIZE
+import json
 # Opensearch数据库的处理类,负责数据转化,数据上传,数据搜索
 class OpenSearchConnection(ConnectionInterface):
     def _clean_term(self, term: str) -> str:
@@ -68,6 +69,9 @@ class OpenSearchConnection(ConnectionInterface):
             
             # 添加管道缓存
             self._pipeline_cache = {}
+            
+            # 初始化搜索分析日志记录器
+            self._search_analysis_logger = None
             
             # 初始化成功后立即进行心跳测试
             self.logger.info("OpenSearch客户端初始化成功，开始心跳测试...")
@@ -278,6 +282,10 @@ class OpenSearchConnection(ConnectionInterface):
                 # 直接返回原始 hits，不进行格式转换
                 return response
             
+            # 如果启用调试，收集分析信息
+            if DEBUG_ANALYZE:
+                self._collect_and_log_analysis(query, response, time.time())
+            
         except Exception as e:
             self.logger.error(f"Hybrid搜索失败: {str(e)}")
             raise
@@ -433,14 +441,25 @@ class OpenSearchConnection(ConnectionInterface):
             else:
                 search_body = self._build_hybrid_query_with_weights(query, query_vector, bm25_weight, vector_weight, filter, top_k)
             
-            # 5. 执行搜索（修复：使用 search_pipeline 参数）
+            # 5. 根据配置决定是否添加explain参数
+            if DEBUG_ANALYZE:
+                search_body["explain"] = True
+            
+            # 6. 执行搜索（修复：使用 search_pipeline 参数）
             response = self.client.search(
                 body=search_body,
                 index=self.index,
                 search_pipeline=pipeline_id
             )
             
-            # 6. 处理结果
+            # 7. 对搜索结果进行去重处理
+            response = self._deduplicate_response(response)
+            
+            # 8. 如果启用调试，收集分析信息
+            if DEBUG_ANALYZE:
+                self._collect_and_log_analysis(query, response, time.time())
+            
+            # 9. 处理结果
             hits = response.get('hits', {})
             
             # 添加调试日志
@@ -511,6 +530,47 @@ class OpenSearchConnection(ConnectionInterface):
             self.logger.error(f"创建搜索管道失败: {str(e)}")
             raise
     
+    def _deduplicate_response(self, response: dict) -> dict:
+        """
+        对OpenSearch搜索结果进行去重处理
+        
+        Args:
+            response: OpenSearch返回的原始响应
+            
+        Returns:
+            dict: 去重后的响应
+        """
+        # 深拷贝response，避免修改原始数据
+        import copy
+        result = copy.deepcopy(response)
+        
+        # 获取hits数组
+        if 'hits' not in result or result['hits'] is None or 'hits' not in result['hits']:
+            return result
+            
+        hits = result['hits']['hits']
+        if not hits:
+            return result
+            
+        # 基于doc_id去重，保留最高分
+        seen_docs = {}
+        for hit in hits:
+            doc_id = hit['_id']
+            score = hit['_score']
+            
+            # 如果没见过这个doc_id，或者当前分数更高，则保留
+            if doc_id not in seen_docs or score > seen_docs[doc_id]['_score']:
+                seen_docs[doc_id] = hit
+        
+        # 按分数降序排列，重建hits数组
+        deduplicated_hits = sorted(seen_docs.values(), key=lambda x: x['_score'], reverse=True)
+        
+        # 更新response
+        result['hits']['hits'] = deduplicated_hits
+        result['hits']['total']['value'] = len(deduplicated_hits)
+        
+        return result
+        
     def _build_hybrid_query(self, query: str, query_vector: list, filter: dict = None, top_k: int = 20) -> dict:
         """
         构建混合搜索查询
@@ -2039,3 +2099,146 @@ class OpenSearchConnection(ConnectionInterface):
             "size": top_k,
             "query": hybrid_query  # 直接返回 hybrid_query，保持过滤条件
         }
+    
+    def _collect_and_log_analysis(self, query: str, response: dict, start_time: float):
+        """收集和记录精简的搜索分析信息"""
+        try:
+            # 收集精简的explain信息
+            explain_result = self._extract_explain_info(response)
+            
+            # 调用_analyze API
+            analyze_result = self._call_analyze_api(query)
+            
+            # 构建精简的日志数据
+            analysis_data = {
+                "query": query,
+                "tokens": analyze_result["tokens"],
+                "results": explain_result,
+                "execution_time": round(time.time() - start_time, 3),
+                "result_count": response.get("hits", {}).get("total", {}).get("value", 0)
+            }
+            
+            # 写入日志
+            logger = self._get_search_analysis_logger()
+            logger.log_search_analysis(analysis_data)
+            
+        except Exception as e:
+            self.logger.warning(f"搜索分析信息收集失败: {str(e)}")
+    
+    def _extract_explain_info(self, response: dict) -> list:
+        """从搜索响应中提取精简的explain信息"""
+        explain_results = []
+        seen_doc_ids = set()  # 用于去重
+        
+        for hit in response.get("hits", {}).get("hits", []):
+            doc_id = hit["_id"]
+            
+            # 如果已经见过这个doc_id，跳过
+            if doc_id in seen_doc_ids:
+                continue
+                
+            seen_doc_ids.add(doc_id)
+            
+            # 提取基本信息
+            doc_info = {
+                "doc_id": doc_id,
+                "score": hit["_score"]
+            }
+            
+            # 提取explanation中的关键信息
+            explanation = hit.get("_explanation", {})
+            if explanation:
+                # 提取文本相似度（TF-IDF相关评分）
+                text_score = self._extract_text_similarity_score(explanation)
+                if text_score is not None:
+                    doc_info["text_similarity"] = text_score
+                
+                # 提取向量相似度（KNN相关评分）
+                vector_score = self._extract_vector_similarity_score(explanation)
+                if vector_score is not None:
+                    doc_info["vector_similarity"] = vector_score
+            
+            explain_results.append(doc_info)
+        return explain_results
+    
+    def _extract_text_similarity_score(self, explanation: dict) -> float:
+        """从explanation中提取文本相似度评分"""
+        try:
+            # 查找包含文本匹配的评分部分
+            if "details" in explanation:
+                for detail in explanation["details"]:
+                    if "description" in detail and "text:" in detail.get("description", ""):
+                        return detail.get("value", 0.0)
+            return None
+        except Exception:
+            return None
+    
+    def _extract_vector_similarity_score(self, explanation: dict) -> float:
+        """从explanation中提取向量相似度评分"""
+        try:
+            # 查找包含KNN搜索的评分部分
+            if "details" in explanation:
+                for detail in explanation["details"]:
+                    if "description" in detail and "knn search" in detail.get("description", "").lower():
+                        return detail.get("value", 0.0)
+            return None
+        except Exception:
+            return None
+    
+    def _call_analyze_api(self, query: str) -> dict:
+        """调用OpenSearch的_analyze API，返回精简的分词结果"""
+        try:
+            body = {
+                "analyzer": "standard",  # 或使用索引中定义的分析器
+                "text": query
+            }
+            response = self.client.indices.analyze(index=self.index, body=body)
+            return {
+                "tokens": [t["token"] for t in response.get("tokens", [])]
+            }
+        except Exception as e:
+            return {
+                "error": str(e),
+                "tokens": []
+            }
+    
+    def _get_search_analysis_logger(self):
+        """获取搜索分析日志记录器"""
+        if self._search_analysis_logger is None:
+            self._search_analysis_logger = SearchAnalysisLogger()
+        return self._search_analysis_logger
+
+
+class SearchAnalysisLogger:
+    """搜索分析日志记录器"""
+    
+    def __init__(self, log_file=None, max_size=None):
+        self.log_file = log_file or SEARCH_ANALYSIS_LOG_FILE
+        self.max_size = max_size or SEARCH_ANALYSIS_LOG_MAX_SIZE
+        self._setup_logger()
+    
+    def _setup_logger(self):
+        """设置日志记录器"""
+        # 创建日志目录
+        os.makedirs(os.path.dirname(self.log_file), exist_ok=True)
+        
+        # 检查文件大小，超过限制时轮转
+        if os.path.exists(self.log_file) and os.path.getsize(self.log_file) > self.max_size:
+            self._rotate_log_file()
+    
+    def _rotate_log_file(self):
+        """轮转日志文件"""
+        timestamp = datetime.now().strftime("%y%m%d%H%M")
+        base_name = os.path.splitext(os.path.basename(self.log_file))[0]
+        log_dir = os.path.dirname(self.log_file)
+        new_filename = os.path.join(log_dir, f"{base_name}_{timestamp}.log")
+        os.rename(self.log_file, new_filename)
+    
+    def log_search_analysis(self, analysis_data):
+        """记录搜索分析信息"""
+        try:
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(analysis_data, ensure_ascii=False) + '\n')
+        except Exception as e:
+            # 静默忽略日志写入失败，不影响搜索功能
+            pass

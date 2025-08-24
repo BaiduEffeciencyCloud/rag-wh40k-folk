@@ -124,6 +124,13 @@ QWEN_DIMENSION = 2048  # QWEN嵌入向量维度
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_SERVER="https://api.deepseek.com/v1"
 DEEPSEEK_MODEL="deepseek-chat"
+
+#检索分析调试配置
+DEBUG_ANALYZE = True  # 搜索分析调试开关，默认关闭
+# 搜索分析日志配置
+SEARCH_ANALYSIS_LOG_FILE = "log/search_analysis.log"  # 搜索分析日志文件路径
+SEARCH_ANALYSIS_LOG_MAX_SIZE = 5 * 1024 * 1024  # 搜索分析日志最大文件大小（5MB）
+
 # Hybrid检索配置
 #当 α = 0 时，完全依赖稀疏检索（纯 BM25/TF-IDF）；
 #当 α = 1 时，完全依赖密集检索（纯语义向量匹配）；

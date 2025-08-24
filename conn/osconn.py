@@ -16,6 +16,7 @@ import dashscope
 from http import HTTPStatus
 from config import PIPELINE_BM25_BOOST, PIPELINE_VECTOR_BOOST, HYBRID_ALPHA
 from config import QUERY_LENGTH_THRESHOLDS, BOOST_WEIGHTS, MATCH_PHRASE_CONFIG, HEADING_WEIGHTS, ENABLE_PIPELINE_CACHE
+from config import SEARCH_FIELD_WEIGHTS
 # Opensearch数据库的处理类,负责数据转化,数据上传,数据搜索
 class OpenSearchConnection(ConnectionInterface):
     def _clean_term(self, term: str) -> str:
@@ -1949,15 +1950,13 @@ class OpenSearchConnection(ConnectionInterface):
     
     def _build_metadata_query(self, query: str) -> dict:
         """构建元数据字段查询"""
+        # 使用配置化的字段权重，构建fields列表
+        fields = [f"{field}^{weight}" for field, weight in SEARCH_FIELD_WEIGHTS.items()]
+        
         return {
             "multi_match": {
                 "query": query,
-                "fields": [
-                    "section_heading^1.5",    # 章节标题
-                    "content_type^1.3",       # 内容类型
-                    "chunk_type^1.2",         # 块类型
-                    "faction^1.0"             # 阵营
-                ],
+                "fields": fields,
                 "type": "best_fields"
             }
         }

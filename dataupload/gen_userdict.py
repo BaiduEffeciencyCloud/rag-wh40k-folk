@@ -14,7 +14,7 @@ import string
 import ahocorasick
 import dataupload.config as global_config
 from dataupload.phrase_weight import PhraseWeightScorer, AutoThresholdPhraseWeightScorer
-
+from dataupload.wh40k_whitelist_generator import WH40KWhitelistGenerator
 # 加载.env配置
 dotenv.load_dotenv()
 
@@ -594,7 +594,7 @@ def generate_hybrid_whitelist(texts, output_path, wh40k_vocab_path=None):
     # 2. 加载专业术语（如果提供）
     wh40k_phrases = []
     if wh40k_vocab_path:
-        from dataupload.wh40k_whitelist_generator import WH40KWhitelistGenerator
+
         generator = WH40KWhitelistGenerator(wh40k_vocab_path)
         wh40k_phrases = generator.extract_wh40k_phrases()
     

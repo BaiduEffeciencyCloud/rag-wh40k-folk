@@ -14,6 +14,7 @@ from dataupload.vector_builder import build_vector_data, build_vector_via_db, ba
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dataupload.data_vector_v3 import SemanticDocumentChunker, save_chunks_to_text, save_chunks_to_json
+from dataupload.data_vector_v4 import AdSemanticDocumentChunker
 
 from dataupload.knowledge_graph_manager import KnowledgeGraphManager
 from storage.storage_factory import StorageFactory
@@ -74,6 +75,9 @@ class UpsertManager:
             if self.chunker_version == 'v3':
                 self.chunker = SemanticDocumentChunker(faction_name=faction)
                 logging.info("✅ SemanticDocumentChunker (v3) 初始化完成")
+            elif self.chunker_version == 'v4':
+                self.chunker = AdSemanticDocumentChunker(faction_name=faction)
+                logging.info("✅ AdSemanticDocumentChunker (v4) 初始化完成")
             else:
                 raise ValueError(f"不支持的切片器版本: {self.chunker_version}")
         if enable_kg and self.kg_manager is None:
@@ -402,7 +406,7 @@ def main():
     parser = argparse.ArgumentParser(description="文档入库流程管理器")
     parser.add_argument("file_path", type=str, help="要处理的文档路径")
     parser.add_argument("--env", type=str, default="production", choices=["production", "test", "development"], help="运行环境")
-    parser.add_argument("-cv", "--chunker-version", type=str, default="v3", choices=["v2", "v3"], help="选择使用的切片器版本 (v2/v3)")
+    parser.add_argument("-cv", "--chunker-version", type=str, default="v3", choices=["v3", "v4"], help="选择使用的切片器版本 (v2/v3/v4)")
     parser.add_argument("--no-kg", action="store_true", help="禁用知识图谱写入")
     parser.add_argument("--db", type=str, default="opensearch", choices=["pinecone", "opensearch"], help="选择使用的数据库")
     parser.add_argument("--faction", type=str, help="指定faction（可选，优先级最高）")

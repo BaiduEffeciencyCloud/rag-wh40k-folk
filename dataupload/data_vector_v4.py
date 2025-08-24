@@ -18,6 +18,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from dataupload.config import LOGICAL_BLOCK_CONFIG
+from dataupload.data_vector_v3 import SemanticDocumentChunker as SemanticDocumentChunkerV3
 
 
 class DocumentStructureExtractor:
@@ -29,10 +30,10 @@ class DocumentStructureExtractor:
     - 识别h1-h6标题层级
     - 构建层级映射关系
     """
-
+    
     def __init__(self):
         pass
-
+    
     def extract_structure(self, text: str) -> Dict[str, Any]:
         """
         提取文档结构
@@ -91,11 +92,11 @@ class StructureValidator:
     - 检查chunk的层级信息
     - 提供结构优化建议
     """
-
+    
     def __init__(self, document_structure: Dict[str, Any]):
         self.document_structure = document_structure
         self.hierarchy_map = document_structure.get('hierarchy_map', {})
-
+    
     def validate_chunk_hierarchy(self, chunk: Dict[str, Any]) -> Dict[str, Any]:
         """
         验证chunk的层级信息是否正确
@@ -119,10 +120,10 @@ class StructureValidator:
         if section_heading and section_heading not in self.hierarchy_map:
             validation_result['warnings'].append(
                 f"section_heading '{section_heading}' 不在文档结构中"
-            )
+                )
         
         return validation_result
-
+    
 
 class LogicalBlockSplitter:
     """
@@ -289,22 +290,24 @@ class LogicalBlockSplitter:
         return None
 
 
-class SemanticDocumentChunker:
+class AdSemanticDocumentChunker:
     """
-    语义文档分块器 V4
+    高级语义文档分块器 V4 (Advanced)
     
     核心特性：
     - 专注于语义完整性和上下文保持
     - 强化语义连贯性评估
     - 智能chunk优化和分割
     - 结构化metadata设计（chunk_type, hierarchy, content_type, faction, sub_section）
+    - 智能策略选择：逻辑语义块分块 vs V3兼容分块
     """
-
+    
     def __init__(self,
                  document_name: str = "",
                  max_tokens: int = 512,
                  overlap_tokens: int = 50,
-                 content_type: str = "unit"):
+                 content_type: str = "unit",
+                 faction_name: str = "unknown"):
         """
         初始化分块器
         
@@ -313,11 +316,13 @@ class SemanticDocumentChunker:
             max_tokens: 最大token数
             overlap_tokens: 重叠token数
             content_type: 内容类型
+            faction_name: 分支势力名称，如果未传入则使用"unknown"
         """
         self.document_name = document_name
         self.max_tokens = max_tokens
         self.overlap_tokens = overlap_tokens
         self.content_type = content_type
+        self.faction_name = faction_name
         
         # 初始化组件
         self.structure_extractor = DocumentStructureExtractor()
@@ -330,34 +335,138 @@ class SemanticDocumentChunker:
         # Token计数器
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
 
-    def chunk_text(self, text: str) -> List[Dict[str, Any]]:
+    def chunk_text(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         将文本分割为语义chunks
         
         Args:
             text: 要分割的文本
+            metadata: 额外的元数据（保持与V3接口兼容，但不使用）
             
         Returns:
             chunks列表，每个chunk包含text和metadata
         """
-        # Step 1: 使用DocumentStructureExtractor预处理文档结构
-        self.document_structure = self.structure_extractor.extract_structure(text)
+        # Step 1: 策略选择
+        strategy = self._choose_strategy(text)
         
-        # Step 2: 初始化StructureValidator
+        # Step 2: 根据策略执行
+        if strategy == "logical_blocks":
+            return self._process_with_logical_blocks(text)
+                        else:
+            return self._process_with_v3_compatible(text, metadata)
+
+    def _choose_strategy(self, text: str) -> str:
+        """
+        一次性判断文档适合的处理策略
+        
+        Args:
+            text: 要分析的文本
+            
+        Returns:
+            策略名称："logical_blocks" 或 "v3_compatible"
+        """
+        # 检查是否有H3标题
+        h3_sections = self._find_h3_sections(text)
+        
+        if not h3_sections:
+            return "v3_compatible"  # 场景A
+        
+        # 检查H3内容是否包含boundary_keywords
+        for section in h3_sections:
+            if self._contains_boundary_keywords(section):
+                return "logical_blocks"  # 场景B
+        
+        return "v3_compatible"  # 场景C
+
+    def _find_h3_sections(self, text: str) -> List[Dict[str, Any]]:
+        """
+        查找文档中的H3标题段落
+        
+        Args:
+            text: 要分析的文本
+            
+        Returns:
+            H3段落列表，每个段落包含heading和content
+        """
+        lines = text.split('\n')
+        h3_sections = []
+        current_h3 = None
+        current_content = []
+        
+        for line in lines:
+            if line.startswith('### '):
+                # 保存前一个H3段落
+                if current_h3:
+                    h3_sections.append({
+                        'heading': current_h3,
+                        'content': '\n'.join(current_content).strip()
+                    })
+                
+                # 开始新的H3段落
+                current_h3 = line[4:].strip()
+                current_content = []
+            elif line.startswith('# ') or line.startswith('## '):
+                # 遇到H1或H2标题时，结束当前H3段落
+                if current_h3:
+                    h3_sections.append({
+                        'heading': current_h3,
+                        'content': '\n'.join(current_content).strip()
+                    })
+                    current_h3 = None
+                    current_content = []
+            elif current_h3:
+                current_content.append(line)
+        
+        # 保存最后一个H3段落
+        if current_h3:
+            h3_sections.append({
+                'heading': current_h3,
+                'content': '\n'.join(current_content).strip()
+            })
+        
+        return h3_sections
+
+    def _contains_boundary_keywords(self, section: Dict[str, Any]) -> bool:
+        """
+        检查H3段落内容是否包含boundary_keywords
+        
+        Args:
+            section: H3段落信息
+            
+        Returns:
+            是否包含boundary_keywords
+        """
+        content = section['content']
+        boundary_keywords = LOGICAL_BLOCK_CONFIG["boundary_keywords"]
+        
+        # 检查是否包含任何boundary_keywords
+        for keyword in boundary_keywords:
+            # 支持两种格式：**关键词:** 和 **关键词 (Abilities):**
+            if f"**{keyword}:**" in content or f"**{keyword} (" in content:
+                return True
+        
+        return False
+
+    def _process_with_logical_blocks(self, text: str) -> List[Dict[str, Any]]:
+        """
+        使用逻辑语义块分割处理文档
+        
+        Args:
+            text: 要处理的文本
+            
+        Returns:
+            chunks列表
+        """
+        # 使用现有的逻辑语义块分割逻辑
+        self.document_structure = self.structure_extractor.extract_structure(text)
         self.structure_validator = StructureValidator(self.document_structure)
         
-        # Step 3: 按标题分割文本
         sections = self._split_headings(text)
-        
         all_chunks = []
         
         for section in sections:
-            # 在section内进行逻辑语义块分割
             sub_sections = self._split_logical_blocks_in_section(section)
-            
             for sub_section in sub_sections:
-                # 处理每个sub-section的内容
-                # 动态确定content_type，而不是使用固定的self.content_type
                 content_type = self._determine_content_type(
                     sub_section['heading'],
                     sub_section['level'],
@@ -373,10 +482,46 @@ class SemanticDocumentChunker:
                 )
                 all_chunks.extend(chunks)
         
-        # Step 4: 优化chunks
-        optimized_chunks = self._optimize_chunks(all_chunks)
+        return self._optimize_chunks(all_chunks)
+
+    def _process_with_v3_compatible(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """
+        使用V3兼容切片处理文档
         
-        return optimized_chunks
+        Args:
+            text: 要处理的文本
+            metadata: 额外的元数据（传递给V3 chunker）
+            
+        Returns:
+            chunks列表
+        """
+        # 直接复用V3的完整逻辑，使用正确的参数
+        v3_chunker = SemanticDocumentChunkerV3(
+            encoding_name='cl100k_base',
+            max_tokens=self.max_tokens,
+            overlap_tokens=self.overlap_tokens,
+            min_semantic_units=2,
+            document_name=self.document_name,
+            faction_name=self.faction_name # 使用传入的faction_name
+        )
+        v3_chunks = v3_chunker.chunk_text(text, metadata)
+        
+        # 为V3的chunk添加sub_section='basic'
+        return self._add_sub_section_to_v3_chunks(v3_chunks)
+
+    def _add_sub_section_to_v3_chunks(self, v3_chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        为V3生成的chunk添加sub_section字段
+        
+        Args:
+            v3_chunks: V3生成的chunks
+        
+        Returns:
+            添加了sub_section字段的chunks
+        """
+        for chunk in v3_chunks:
+            chunk['sub_section'] = 'basic'
+        return v3_chunks
 
     def _split_headings(self, text: str) -> List[Dict[str, Any]]:
         """
@@ -447,7 +592,7 @@ class SemanticDocumentChunker:
         
         Args:
             section: 要分割的section
-            
+        
         Returns:
             逻辑语义块列表
         """
@@ -477,13 +622,13 @@ class SemanticDocumentChunker:
     def _determine_content_type(self, heading: str, level: int, content: str) -> str:
         """
         动态确定content_type
-        
-        Args:
+    
+    Args:
             heading: 标题
             level: 标题层级
             content: 内容
-            
-        Returns:
+        
+    Returns:
             content_type字符串
         """
         heading_lower = heading.lower()
@@ -609,7 +754,7 @@ class SemanticDocumentChunker:
                 return f"{faction}单位数据-{h1}-{h2}-{h3}"
             elif h1 and h2:
                 return f"{faction}单位数据-{h1}-{h2}"
-            else:
+                    else:
                 return f"{faction}单位数据-{h1}"
         elif content_type == "corerule":
             return f"{faction}核心规则-{hierarchy.get('h1', '')}"
@@ -627,17 +772,12 @@ class SemanticDocumentChunker:
         Returns:
             faction字符串
         """
-        # 根据h1标题判断faction
-        h1 = hierarchy.get('h1', '').lower()
+        # 如果传入了faction_name，优先使用（包括空字符串）
+        if self.faction_name is not None and self.faction_name != "unknown":
+            return self.faction_name
         
-        if 'aeldari' in h1 or '艾达灵族' in h1:
-            return "阿苏焉尼"
-        elif 'space marine' in h1 or '星际战士' in h1:
-            return "星际战士"
-        elif 'chaos' in h1 or '混沌' in h1:
-            return "混沌"
-        else:
-            return "其他"
+        # 否则返回"unknown"
+        return "unknown"
 
     def _count_tokens(self, text: str) -> int:
         """
@@ -670,7 +810,7 @@ class SemanticDocumentChunker:
             if token_count <= self.max_tokens:
                 # 直接使用
                 optimized_chunks.append(chunk)
-            else:
+                else:
                 # 需要分割
                 split_chunks = self._split_large_chunk(chunk)
                 optimized_chunks.extend(split_chunks)
@@ -687,8 +827,8 @@ class SemanticDocumentChunker:
         Returns:
             分割后的chunks列表
         """
-        text = chunk['text']
-        token_count = self._count_tokens(text)
+            text = chunk['text']
+            token_count = self._count_tokens(text)
         
         if token_count <= self.max_tokens:
             return [chunk]
@@ -710,7 +850,7 @@ class SemanticDocumentChunker:
             
             if test_token_count <= self.max_tokens:
                 current_chunk_text = test_text
-            else:
+                    else:
                 # 保存当前chunk
                 if current_chunk_text:
                     current_chunk['text'] = current_chunk_text.rstrip('。')
@@ -730,12 +870,12 @@ class SemanticDocumentChunker:
     def save_to_json(self, chunks: List[Dict[str, Any]], filename: str = None) -> str:
         """
         保存chunks到JSON文件
-        
-        Args:
+    
+    Args:
             chunks: 要保存的chunks
             filename: 文件名，如果为None则自动生成
-            
-        Returns:
+        
+    Returns:
             保存的文件路径
         """
         if filename is None:
@@ -747,8 +887,8 @@ class SemanticDocumentChunker:
         
         # 保存到JSON文件
         with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(chunks, f, ensure_ascii=False, indent=2)
-        
+        json.dump(chunks, f, ensure_ascii=False, indent=2)
+    
         return filename
 
 
@@ -767,18 +907,18 @@ def main():
     try:
         # 读取文件
         with open(file_path, 'r', encoding='utf-8') as f:
-            text = f.read()
-        
+        text = f.read()
+
         # 创建分块器
-        chunker = SemanticDocumentChunker(document_name="aeldaricodex")
+        chunker = AdSemanticDocumentChunker(document_name="aeldaricodex")
         
         # 进行分块
         print("开始逻辑语义块切片...")
         chunks = chunker.chunk_text(text)
-        print(f"生成 {len(chunks)} 个切片")
+    print(f"生成 {len(chunks)} 个切片")
         
         # 优化切片
-        print("优化切片...")
+    print("优化切片...")
         optimized_chunks = chunker._optimize_chunks(chunks)
         print(f"优化后 {len(optimized_chunks)} 个切片")
         
@@ -810,7 +950,7 @@ def main():
     except Exception as e:
         print(f"错误：{e}")
         sys.exit(1)
-
+    
 
 if __name__ == "__main__":
     main() 

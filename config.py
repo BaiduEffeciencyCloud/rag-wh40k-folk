@@ -185,16 +185,17 @@ MATCH_PHRASE_CONFIG = {
     }
 }
 
-# 不同查询类型的策略偏好
-QUERY_TYPE_STRATEGY_PREFERENCE = {
-    'fact': 'match_phrase',      # 事实查询偏好match_phrase
-    'list': 'hybrid',           # 列举查询使用混合策略
-    'compare': 'match_phrase',   # 比较查询偏好match_phrase
-    'rule': 'terms',            # 规则查询偏好terms
-    'semantic': 'match_phrase',  # 语义查询偏好match_phrase
-}
 
 # ========== 混合搜索优化配置 ==========
+# 搜索字段权重配置
+SEARCH_FIELD_WEIGHTS = {
+    "section_heading": 1.0,    # 章节标题权重
+    "sub_section": 1.3,        # 子章节权重（V4新增字段）
+    "content_type": 1.0,       # 内容类型权重
+    "chunk_type": 1.0,         # 块类型权重
+    "faction": 1.0             # 阵营权重
+}
+
 # 标题权重配置
 HEADING_WEIGHTS = {
     'h1': 1.0,

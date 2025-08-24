@@ -42,8 +42,8 @@ PROCESSOR_CONFIGS = {
         'dynamic_lambda': True,  # 是否启用动态λ调整
         'use_optimized_mmr': True,  # 是否使用优化的MMR算法
         'base_lambda': 0.5,        # 动态λ调整的基础值
-        'short_query_threshold': 13,  # 短查询长度阈值
-        'medium_query_threshold': 25, # 中等查询长度阈值
+        'short_query_threshold': 17,  # 短查询长度阈值
+        'medium_query_threshold': 30, # 中等查询长度阈值
         
         # 动态lambda调整参数（新增）
         'short_adjustment': 0.3,        # 短查询调整值

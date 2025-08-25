@@ -99,13 +99,19 @@ def filter_struct_particle(token):
 
 # 数字和空格过滤
 def filter_number_and_space(token):
+    if not token: return False
+    if token.strip().isdigit(): return False  # 只过滤纯数字
+    if token.strip() == '': return False
+    if token != token.strip(): return False
+    return True
+
+# 特殊符号过滤
+def filter_special_symbols(token):
     if not token:
         return False
-    # 过滤纯数字
-    if token.strip().isdigit():
-        return False
-    # 过滤全空格
-    if token.strip() == '':
+    # 过滤包含特殊符号的词汇（如@、#、$、%等）
+    special_chars = set('@#$%^&*()_+-=[]{}|\\:;"\'<>?,./')
+    if any(c in special_chars for c in token):
         return False
     return True
 
@@ -217,6 +223,8 @@ def generate_whitelist(phrases, output_path, unigram_counter=None, do_filter=Tru
     max_freq = max(unigram_counter.values()) if unigram_counter else 1000
     idf0 = max_freq + 1
     meta = {}
+    
+    # 1. 生成完整格式词典（包含频率和词性）
     with open(output_path, 'w', encoding='utf-8') as f:
         for p in phrases:
             if is_valid_token(p, do_filter):
@@ -230,11 +238,22 @@ def generate_whitelist(phrases, output_path, unigram_counter=None, do_filter=Tru
                     weight = idf0
                 f.write(f"{p} {weight} n\n")
                 meta[p] = {"df": df, "pmi": pmi, "weight": weight}
+    
+    # 2. 生成纯词汇文件（用于OpenSearch synonyms_path）
+    warhammer_dict_path = output_path.replace('all_docs_dict_', 'warhammer_dict_').replace('.txt', '.txt')
+    with open(warhammer_dict_path, 'w', encoding='utf-8') as f:
+        for p in phrases:
+            # 只做基本的有效性检查，不过度过滤
+            if p and p.strip() and not p.strip().isdigit():
+                f.write(f"{p.strip()}\n")
+    
     # 保存meta信息
     meta_path = output_path + ".meta.json"
     with open(meta_path, 'w', encoding='utf-8') as mf:
         json.dump(meta, mf, ensure_ascii=False, indent=2)
+    
     logging.info(f"✅ 保护性词典已保存: {output_path}, meta: {meta_path}")
+    logging.info(f"✅ OpenSearch词典已保存: {warhammer_dict_path}")
 
 def save_bm25_vocab(bm25_manager, output_path, do_filter=True, scorer=None, phrase_df=None, phrase_pmi=None):
     print("[DEBUG] save_bm25_vocab, vocab size:", len(bm25_manager.vocabulary))
@@ -523,8 +542,8 @@ def generate_userdict_and_vocab(input_dir, output_dir, min_freq=5, min_pmi=3.0, 
     
     # 生成保护性词典
     if global_config.ENABLE_WH40K_WHITELIST:
-        # 使用混合白名单生成
-        generate_hybrid_whitelist(texts, dict_path, global_config.WH40K_VOCAB_PATH)
+        # 使用混合白名单生成（传递配置参数）
+        generate_hybrid_whitelist(texts, dict_path, global_config.WH40K_VOCAB_PATH, config=config_dict)
     else:
         # 使用原来的逻辑
         generate_whitelist(phrases, dict_path, unigram_counter=None, do_filter=True, config=config_dict)
@@ -585,7 +604,7 @@ def main():
     else:
         print('[WARN] 未生成任何文件')
 
-def generate_hybrid_whitelist(texts, output_path, wh40k_vocab_path=None):
+def generate_hybrid_whitelist(texts, output_path, wh40k_vocab_path=None, config=None):
     """生成混合白名单：自动发现 + 专业术语"""
     
     # 1. 自动发现短语
@@ -594,15 +613,14 @@ def generate_hybrid_whitelist(texts, output_path, wh40k_vocab_path=None):
     # 2. 加载专业术语（如果提供）
     wh40k_phrases = []
     if wh40k_vocab_path:
-
         generator = WH40KWhitelistGenerator(wh40k_vocab_path)
         wh40k_phrases = generator.extract_wh40k_phrases()
     
     # 3. 合并去重
     all_phrases = list(set(auto_phrases + wh40k_phrases))
     
-    # 4. 生成白名单
-    generate_whitelist(all_phrases, output_path)
+    # 4. 生成白名单（传递配置参数）
+    generate_whitelist(all_phrases, output_path, config=config)
     
     return output_path
 

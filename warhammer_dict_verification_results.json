@@ -1,0 +1,34 @@
+{
+  "warhammer_vs_all_docs_meta": {
+    "warhammer_total": 2484,
+    "all_docs_meta_total": 2471,
+    "missing_in_warhammer": 0,
+    "extra_in_warhammer": 13,
+    "common": 2471,
+    "missing_list": [],
+    "extra_list": [
+      "40k",
+      "wh40k",
+      "单位1",
+      "单位10",
+      "单位2",
+      "单位3",
+      "单位4",
+      "单位5",
+      "单位6",
+      "单位7",
+      "单位8",
+      "单位9",
+      "战锤40K"
+    ]
+  },
+  "warhammer_vs_wh40k": {
+    "warhammer_total": 2484,
+    "wh40k_total": 475,
+    "missing_wh40k_in_warhammer": 1,
+    "common": 474,
+    "missing_list": [
+      "死神军毒灾飞艇 "
+    ]
+  }
+}

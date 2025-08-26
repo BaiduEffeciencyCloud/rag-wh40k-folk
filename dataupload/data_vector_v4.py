@@ -352,7 +352,7 @@ class AdSemanticDocumentChunker:
         # Step 2: 根据策略执行
         if strategy == "logical_blocks":
             return self._process_with_logical_blocks(text)
-                        else:
+        else:
             return self._process_with_v3_compatible(text, metadata)
 
     def _choose_strategy(self, text: str) -> str:
@@ -754,7 +754,7 @@ class AdSemanticDocumentChunker:
                 return f"{faction}单位数据-{h1}-{h2}-{h3}"
             elif h1 and h2:
                 return f"{faction}单位数据-{h1}-{h2}"
-                    else:
+            else:
                 return f"{faction}单位数据-{h1}"
         elif content_type == "corerule":
             return f"{faction}核心规则-{hierarchy.get('h1', '')}"
@@ -810,7 +810,7 @@ class AdSemanticDocumentChunker:
             if token_count <= self.max_tokens:
                 # 直接使用
                 optimized_chunks.append(chunk)
-                else:
+            else:
                 # 需要分割
                 split_chunks = self._split_large_chunk(chunk)
                 optimized_chunks.extend(split_chunks)
@@ -827,8 +827,8 @@ class AdSemanticDocumentChunker:
         Returns:
             分割后的chunks列表
         """
-            text = chunk['text']
-            token_count = self._count_tokens(text)
+        text = chunk['text']
+        token_count = self._count_tokens(text)
         
         if token_count <= self.max_tokens:
             return [chunk]
@@ -850,7 +850,7 @@ class AdSemanticDocumentChunker:
             
             if test_token_count <= self.max_tokens:
                 current_chunk_text = test_text
-                    else:
+            else:
                 # 保存当前chunk
                 if current_chunk_text:
                     current_chunk['text'] = current_chunk_text.rstrip('。')
@@ -887,7 +887,7 @@ class AdSemanticDocumentChunker:
         
         # 保存到JSON文件
         with open(filename, 'w', encoding='utf-8') as f:
-        json.dump(chunks, f, ensure_ascii=False, indent=2)
+            json.dump(chunks, f, ensure_ascii=False, indent=2)
     
         return filename
 
@@ -896,61 +896,60 @@ def main():
     """
     主函数，用于测试和演示
     """
-    
     if len(sys.argv) != 2:
         print("用法: python3 data_vector_v4.py <测试文件路径>")
         print("示例: python3 data_vector_v4.py test/testdata/aeldaricodex.md")
         sys.exit(1)
-    
+
     file_path = sys.argv[1]
-    
+
     try:
         # 读取文件
         with open(file_path, 'r', encoding='utf-8') as f:
-        text = f.read()
+            text = f.read()
 
         # 创建分块器
         chunker = AdSemanticDocumentChunker(document_name="aeldaricodex")
-        
+
         # 进行分块
         print("开始逻辑语义块切片...")
         chunks = chunker.chunk_text(text)
-    print(f"生成 {len(chunks)} 个切片")
-        
+        print(f"生成 {len(chunks)} 个切片")
+
         # 优化切片
-    print("优化切片...")
+        print("优化切片...")
         optimized_chunks = chunker._optimize_chunks(chunks)
         print(f"优化后 {len(optimized_chunks)} 个切片")
-        
+
         # 统计sub_section分布
         sub_section_counts = {}
         for chunk in optimized_chunks:
             sub_section = chunk.get('sub_section', 'basic')
             sub_section_counts[sub_section] = sub_section_counts.get(sub_section, 0) + 1
-        
+
         print("\n=== sub_section分布统计 ===")
         for sub_section, count in sorted(sub_section_counts.items()):
             print(f"  {sub_section}: {count}个")
-        
+
         # 统计配置文件中的boundary_keywords
         print("\n=== 配置文件中的boundary_keywords ===")
         for keyword in LOGICAL_BLOCK_CONFIG["boundary_keywords"]:
             count = sub_section_counts.get(keyword, 0)
             print(f"  {keyword}: {count}个")
-        
+
         # 保存结果
         output_file = chunker.save_to_json(optimized_chunks)
         print(f"\n结果已保存：")
         print(f"JSON文件：{output_file}")
         print("切片完成！")
-        
+
     except FileNotFoundError:
         print(f"错误：文件 {file_path} 不存在")
         sys.exit(1)
     except Exception as e:
         print(f"错误：{e}")
         sys.exit(1)
-    
+
 
 if __name__ == "__main__":
     main() 

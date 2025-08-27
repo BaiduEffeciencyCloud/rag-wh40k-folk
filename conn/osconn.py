@@ -16,7 +16,7 @@ import dashscope
 from http import HTTPStatus
 from config import PIPELINE_BM25_BOOST, PIPELINE_VECTOR_BOOST, HYBRID_ALPHA
 from config import QUERY_LENGTH_THRESHOLDS, BOOST_WEIGHTS, MATCH_PHRASE_CONFIG, HEADING_WEIGHTS, ENABLE_PIPELINE_CACHE
-from config import SEARCH_FIELD_WEIGHTS, DEBUG_ANALYZE, SEARCH_ANALYSIS_LOG_FILE, SEARCH_ANALYSIS_LOG_MAX_SIZE
+from config import SEARCH_FIELD_WEIGHTS, DEBUG_ANALYZE, SEARCH_ANALYSIS_LOG_FILE, SEARCH_ANALYSIS_LOG_MAX_SIZE, OPENSEARCH_SEARCH_ANALYZER
 import json
 # Opensearch数据库的处理类,负责数据转化,数据上传,数据搜索
 class OpenSearchConnection(ConnectionInterface):
@@ -571,59 +571,7 @@ class OpenSearchConnection(ConnectionInterface):
         
         return result
         
-    def _build_hybrid_query(self, query: str, query_vector: list, filter: dict = None, top_k: int = 20) -> dict:
-        """
-        构建混合搜索查询
-        
-        Args:
-            query: 查询文本
-            query_vector: 查询向量
-            filter: 过滤条件
-            top_k: 返回结果数量
-            
-        Returns:
-            dict: 搜索查询体
-        """
 
-        
-        # 基础查询结构
-        search_body = {
-            "size": top_k,
-            "query": {
-                "hybrid": {
-                    "queries": [
-                        {
-                            "match": {
-                                "text": {
-                                    "query": query,
-                                    "analyzer": "warhammer_search_analyzer",  # 使用自定义analyzer
-                                    "boost": PIPELINE_BM25_BOOST  # 配置化的BM25搜索boost值
-                                }
-                            }
-                        },
-                        {
-                            "knn": {
-                                "embedding": {
-                                    "vector": query_vector,
-                                    "k": top_k,
-                                    "boost": PIPELINE_VECTOR_BOOST  # 配置化的向量搜索boost值
-                                }
-                            }
-                        }
-                    ]
-                }
-            }
-        }
-        
-        # 添加过滤条件
-        if filter:
-            search_body["query"]["hybrid"]["queries"].append({
-                "bool": {
-                    "filter": self._build_filter_query(filter)
-                }
-            })
-        
-        return search_body
     
     def _build_hybrid_query_with_weights(self, query: str, query_vector: list, bm25_weight: float, vector_weight: float, filter: dict = None, top_k: int = 20) -> dict:
         """
@@ -650,7 +598,7 @@ class OpenSearchConnection(ConnectionInterface):
                             "match": {
                                 "text": {
                                     "query": query,
-                                    "analyzer": "warhammer_search_analyzer",  # 使用自定义analyzer
+                                    "analyzer": OPENSEARCH_SEARCH_ANALYZER,  # 使用配置的analyzer
                                     "boost": bm25_weight  # 动态权重
                                 }
                             }
@@ -1862,30 +1810,7 @@ class OpenSearchConnection(ConnectionInterface):
             }
         }
 
-    def _build_hybrid_query(self, sparse_vector: dict, query_text: str) -> dict:
-        """构建混合查询，结合match_phrase和terms"""
-        
-        return {
-            "bool": {
-                "should": [
-                    # 主要查询：match_phrase（带模糊过滤）
-                    {
-                        "match": {
-                            "text": {
-                                "query": query_text,
-                                "boost": MATCH_PHRASE_CONFIG['match_phrase_weight'],
-                                "operator": "or",
-                                "fuzziness": "AUTO",
-                                "fuzzy_options": MATCH_PHRASE_CONFIG.get('fuzzy_filters', [])
-                            }
-                        }
-                    },
-                    # 辅助查询：terms（权重较低）
-                    self._build_terms_query(sparse_vector)
-                ],
-                "minimum_should_match": 1
-            }
-        }
+
 
     def _apply_fuzzy_filters(self, query_text: str) -> str:
         """应用模糊匹配过滤，保护专有名词，过滤高频词"""
@@ -1972,6 +1897,7 @@ class OpenSearchConnection(ConnectionInterface):
                 "query": query,
                 "fields": fields,
                 "type": "best_fields",
+                "analyzer": OPENSEARCH_SEARCH_ANALYZER,  # 使用配置的analyzer
                 "tie_breaker": 0.3
             }
         }
@@ -2004,6 +1930,7 @@ class OpenSearchConnection(ConnectionInterface):
             "match": {
                 "text": {
                     "query": query,
+                    "analyzer": OPENSEARCH_SEARCH_ANALYZER,  # 使用配置的analyzer
                     "boost": self._calculate_content_boost(query),
                     "operator": "or"
                 }
@@ -2019,7 +1946,8 @@ class OpenSearchConnection(ConnectionInterface):
             "multi_match": {
                 "query": query,
                 "fields": fields,
-                "type": "best_fields"
+                "type": "best_fields",
+                "analyzer": OPENSEARCH_SEARCH_ANALYZER  # 使用配置的analyzer
             }
         }
     
@@ -2068,6 +1996,7 @@ class OpenSearchConnection(ConnectionInterface):
             "match": {
                 "text": {
                     "query": query,
+                    "analyzer": OPENSEARCH_SEARCH_ANALYZER,  # 使用配置的analyzer
                     "boost": PIPELINE_BM25_BOOST  # 使用配置文件中的常量
                 }
             }
@@ -2191,7 +2120,7 @@ class OpenSearchConnection(ConnectionInterface):
         """调用OpenSearch的_analyze API，返回精简的分词结果"""
         try:
             body = {
-                "analyzer": "standard",  # 或使用索引中定义的分析器
+                "analyzer": OPENSEARCH_SEARCH_ANALYZER,  # 使用配置的analyzer
                 "text": query
             }
             response = self.client.indices.analyze(index=self.index, body=body)

@@ -194,6 +194,10 @@ MATCH_PHRASE_CONFIG = {
 
 
 # ========== 混合搜索优化配置 ==========
+# OpenSearch Analyzer配置
+OPENSEARCH_INDEX_ANALYZER = "warhammer_index_analyzer"      # 索引时使用的analyzer
+OPENSEARCH_SEARCH_ANALYZER = "warhammer_search_analyzer"    # 搜索时使用的analyzer
+
 # 搜索字段权重配置
 SEARCH_FIELD_WEIGHTS = {
     "section_heading": 1.0,    # 章节标题权重

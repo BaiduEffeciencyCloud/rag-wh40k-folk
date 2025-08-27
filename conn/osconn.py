@@ -596,6 +596,7 @@ class OpenSearchConnection(ConnectionInterface):
                             "match": {
                                 "text": {
                                     "query": query,
+                                    "analyzer": "warhammer_search_analyzer",  # 使用自定义analyzer
                                     "boost": PIPELINE_BM25_BOOST  # 配置化的BM25搜索boost值
                                 }
                             }
@@ -649,6 +650,7 @@ class OpenSearchConnection(ConnectionInterface):
                             "match": {
                                 "text": {
                                     "query": query,
+                                    "analyzer": "warhammer_search_analyzer",  # 使用自定义analyzer
                                     "boost": bm25_weight  # 动态权重
                                 }
                             }

@@ -6,6 +6,9 @@ venv/
 env/
 ENV/
 
+#docker文件
+docker/
+
 # Python缓存文件
 __pycache__/
 *.py[cod]

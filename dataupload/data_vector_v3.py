@@ -656,10 +656,16 @@ class SemanticDocumentChunker:
             h_value = hierarchy.get(h_key, "")
             cleaned_hierarchy[h_key] = self._clean_markdown_heading(h_value)
     
+        # 构建chunk_type
+        chunk_type = self._build_chunk_type(cleaned_hierarchy, content_type)
+        
+        # 在text开头添加chunk_type，用"."隔开
+        text_with_chunk_type = f"{chunk_type}.{text}"
+        
         metadata = {
-            'text': text,
+            'text': text_with_chunk_type,
             'section_heading': cleaned_heading,
-            'chunk_type': self._build_chunk_type(cleaned_hierarchy, content_type),
+            'chunk_type': chunk_type,
             'content_type': content_type,
             'faction': self._build_faction(),
         }

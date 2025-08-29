@@ -269,7 +269,7 @@ class OpenSearchConnection(ConnectionInterface):
                     # 将OpenSearch响应转换为rerank期望的格式
                     candidates = self._convert_response_to_rerank_candidates(response)
                     if candidates:
-                        rerank_results = self.rerank(query, candidates, top_k)
+                        rerank_results = self.rerank(query, candidates, RERANK_TOPK)
                         # 将rerank结果转换回OpenSearch格式
                         return self._convert_rerank_results_to_opensearch_format(rerank_results, response)
                     else:
@@ -995,7 +995,7 @@ class OpenSearchConnection(ConnectionInterface):
         Returns:
             List[Dict]: 重排序后的结果列表，格式与 pineconeRerank 兼容
         """
-        self.logger.info(f"rerank 开始，query: {query[:50]}...，文档数量: {len(candidates)}，模型: {model}")
+        self.logger.info(f"rerank 开始，query: {query[:50]}...，文档数量: {len(candidates)}，模型: {model},TOP-K:{top_k}")
         try:
             # 1. 参数验证
             if not query or not query.strip():
@@ -1909,20 +1909,20 @@ class OpenSearchConnection(ConnectionInterface):
         query_length = len(query.split())
         
         # 获取阈值配置（带默认值）
-        short_threshold = QUERY_LENGTH_THRESHOLDS.get('short', 4)
-        long_threshold = QUERY_LENGTH_THRESHOLDS.get('medium', 8)
+        short_threshold = QUERY_LENGTH_THRESHOLDS.get('short')
+        long_threshold = QUERY_LENGTH_THRESHOLDS.get('medium')
         
         # 长查询/详细描述 - 提高正文权重
         if query_length > long_threshold:
-            return BOOST_WEIGHTS.get('long_query', 1.4)
+            return BOOST_WEIGHTS.get('long_query')
         
         # 中等长度查询
         elif query_length > short_threshold:
-            return BOOST_WEIGHTS.get('medium_query', 1.2)
+            return BOOST_WEIGHTS.get('medium_query')
         
         # 短查询/关键词 - 降低正文权重，侧重标题
         else:
-            return BOOST_WEIGHTS.get('short_query', 0.8)
+            return BOOST_WEIGHTS.get('short_query')
     
     def _build_content_query(self, query: str) -> dict:
         """构建正文字段查询"""
@@ -1953,18 +1953,25 @@ class OpenSearchConnection(ConnectionInterface):
     
     def _build_content_type_filter(self, query: str) -> dict:
         """根据查询内容智能添加内容类型过滤"""
+        # 添加调试日志
+        if DEBUG_ANALYZE:
+            self.logger.info(f"分析查询内容: '{query}'")
+        
         # 规则相关查询
         if any(word in query for word in ["规则", "规则书", "codex", "FAQ"]):
+            if DEBUG_ANALYZE:
+                self.logger.info("识别为规则相关查询，添加content_type过滤")
             return {"content_type": "corerule"}
         
         # 单位相关查询
         elif any(word in query for word in ["单位", "模型", "unit", "数据表"]):
+            if DEBUG_ANALYZE:
+                self.logger.info("识别为单位相关查询，添加chunk_type过滤")
             return {"chunk_type": "unit_data"}
         
-        # 背景相关查询
-        elif any(word in query for word in ["背景", "故事", "lore", "历史"]):
-            return {"content_type": "background"}
         
+        if DEBUG_ANALYZE:
+            self.logger.info("未识别特殊查询类型，不添加额外过滤")
         return {}
     
     def _build_hybrid_query_optimized(self, query: str, query_vector: list, 
@@ -2025,6 +2032,27 @@ class OpenSearchConnection(ConnectionInterface):
                         filter[key] = value
             
             hybrid_query["hybrid"]["filter"] = self._build_filter_query(filter)
+        
+        # 添加调试日志，输出实际构建的查询（精简版，不输出向量数据）
+        if DEBUG_ANALYZE:
+            # 构建精简版查询用于日志输出
+            debug_query = {
+                "hybrid": {
+                    "queries": [
+                        {"type": "heading_query", "fields": list(HEADING_WEIGHTS.keys())},
+                        {"type": "bm25_query", "field": "text"},
+                        {"type": "content_query", "field": "text"},
+                        {"type": "metadata_query", "fields": list(SEARCH_FIELD_WEIGHTS.keys())},
+                        {"type": "knn_query", "field": "embedding", "k": min(100, top_k * 3)}
+                    ]
+                }
+            }
+            if filter:
+                debug_query["hybrid"]["filter"] = filter
+            
+            self.logger.info(f"构建的混合搜索查询类型: {json.dumps(debug_query, ensure_ascii=False, indent=2)}")
+            if filter:
+                self.logger.info(f"应用的过滤条件: {json.dumps(filter, ensure_ascii=False, indent=2)}")
         
         return {
             "size": top_k,
@@ -2124,10 +2152,19 @@ class OpenSearchConnection(ConnectionInterface):
                 "text": query
             }
             response = self.client.indices.analyze(index=self.index, body=body)
+            
+            # 添加调试日志
+            if DEBUG_ANALYZE:
+                self.logger.info(f"查询文本: '{query}'")
+                self.logger.info(f"分词结果: {response.get('tokens', [])}")
+                self.logger.info(f"使用的analyzer: {OPENSEARCH_SEARCH_ANALYZER}")
+            
             return {
                 "tokens": [t["token"] for t in response.get("tokens", [])]
             }
         except Exception as e:
+            if DEBUG_ANALYZE:
+                self.logger.error(f"调用_analyze API失败: {str(e)}")
             return {
                 "error": str(e),
                 "tokens": []

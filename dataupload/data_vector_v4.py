@@ -465,22 +465,38 @@ class AdSemanticDocumentChunker:
         all_chunks = []
         
         for section in sections:
-            sub_sections = self._split_logical_blocks_in_section(section)
-            for sub_section in sub_sections:
-                content_type = self._determine_content_type(
-                    sub_section['heading'],
-                    sub_section['level'],
-                    sub_section['content']
-                )
-                chunks = self._process_section_content(
-                    sub_section['content'],
-                    sub_section['heading'],
-                    sub_section['level'],
-                    sub_section['hierarchy'],
-                    content_type,
-                    {'sub_section': sub_section['sub_section']}
-                )
-                all_chunks.extend(chunks)
+            # 处理H1、H2、H3级别的sections
+            if section['level'] in [1, 2, 3]:
+                if section['level'] == 3:
+                    # H3级别：使用LogicalBlockSplitter处理
+                    sub_sections = self._split_logical_blocks_in_section(section)
+                    for sub_section in sub_sections:
+                        chunks = self._process_section_content(
+                            sub_section['content'],
+                            sub_section['heading'],
+                            sub_section['level'],
+                            sub_section['hierarchy'],
+                            sub_section['sub_section'],  # 直接使用sub_section，不再需要content_type
+                            {'sub_section': sub_section['sub_section']}
+                        )
+                        all_chunks.extend(chunks)
+                else:
+                    # H1、H2级别：直接处理，不经过LogicalBlockSplitter
+                    if section['content'].strip():  # 只处理有内容的sections
+                        # 将hierarchy_stack转换为hierarchy字典格式
+                        hierarchy_dict = {}
+                        for i in range(6):
+                            hierarchy_dict[f'h{i+1}'] = section['hierarchy_stack'][i] if section['hierarchy_stack'][i] else ""
+                        
+                        chunks = self._process_section_content(
+                            section['content'],
+                            section['heading'],
+                            section['level'],
+                            hierarchy_dict,
+                            'basic',  # 直接传递sub_section，不再需要content_type
+                            {'sub_section': 'basic'}  # H1、H2使用basic作为sub_section
+                        )
+                        all_chunks.extend(chunks)
         
         return self._optimize_chunks(all_chunks)
 
@@ -511,21 +527,32 @@ class AdSemanticDocumentChunker:
 
     def _add_sub_section_to_v3_chunks(self, v3_chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        为V3生成的chunk添加sub_section字段
+        为V3生成的chunk添加sub_section字段，并在text前面添加chunk_type
         
         Args:
             v3_chunks: V3生成的chunks
         
         Returns:
-            添加了sub_section字段的chunks
+            添加了sub_section字段和chunk_type前缀的chunks
         """
         for chunk in v3_chunks:
             chunk['sub_section'] = 'basic'
+            
+            # 在text前面添加chunk_type，用"."隔开
+            if 'chunk_type' in chunk and 'text' in chunk:
+                chunk['text'] = f"{chunk['chunk_type']}.{chunk['text']}"
+        
         return v3_chunks
 
     def _split_headings(self, text: str) -> List[Dict[str, Any]]:
         """
-        按标题分割文本
+        基于V3逻辑重构的标题分割方法
+        
+        核心改进：
+        - 恢复V3的完整标题识别能力 (H1-H6)
+        - 保持V3的层级栈管理逻辑
+        - 保持现有H3处理逻辑完全不变
+        - 新增H1、H2内容处理能力
         
         Args:
             text: 要分割的文本
@@ -533,56 +560,61 @@ class AdSemanticDocumentChunker:
         Returns:
             分割后的sections列表
         """
-        lines = text.split('\n')
+        # 直接复用V3的成功逻辑
         sections = []
-        current_section = None
+        current_heading = None
+        current_content = []
+        title_stack = ["" for _ in range(6)]
+        lines = text.split('\n')
         
         for line in lines:
-            if line.startswith('### '):
-                # 保存前一个section
-                if current_section:
-                    sections.append(current_section)
+            m = re.match(r'^(#{1,6})\s+(.*)', line)
+            if m:
+                level = len(m.group(1))
+                title = m.group(2).strip()
                 
-                # 开始新的section
-                heading = line[4:].strip()
-                level = 3
+                # 保存前一个section（即使没有内容也要保存）
+                if current_heading is not None:
+                    sections.append({
+                        'heading': current_heading,
+                        'level': current_heading.count('#'),
+                        'content': '\n'.join(current_content).strip(),
+                        'hierarchy_stack': title_stack.copy()
+                    })
                 
-                # 构建层级信息
-                hierarchy = {}
+                # 处理新标题 - 更新标题栈
+                title_stack[level-1] = title
+                # 清空下级标题
+                for i in range(level, 6):
+                    title_stack[i] = ""
+                
+                # 如果是H1标题，清空所有下级标题（包括H2、H3等）
                 if level == 1:
-                    self.hierarchy_stack[0] = heading
-                elif level == 2:
-                    self.hierarchy_stack[1] = heading
-                elif level == 3:
-                    self.hierarchy_stack[2] = heading
-                elif level == 4:
-                    self.hierarchy_stack[3] = heading
-                elif level == 5:
-                    self.hierarchy_stack[4] = heading
-                elif level == 6:
-                    self.hierarchy_stack[5] = heading
+                    for i in range(1, 6):
+                        title_stack[i] = ""
                 
-                hierarchy = {
-                    'h1': self.hierarchy_stack[0],
-                    'h2': self.hierarchy_stack[1],
-                    'h3': self.hierarchy_stack[2],
-                    'h4': self.hierarchy_stack[3],
-                    'h5': self.hierarchy_stack[4],
-                    'h6': self.hierarchy_stack[5]
-                }
-                
-                current_section = {
-                    'heading': heading,
-                    'level': level,
-                    'hierarchy': hierarchy,
-                    'content': []
-                }
-            elif current_section:
-                current_section['content'].append(line)
+                current_heading = line.strip()
+                current_content = []
+            else:
+                current_content.append(line)
         
-        # 保存最后一个section
-        if current_section:
-            sections.append(current_section)
+        # 保存最后一个section（即使没有内容也要保存）
+        if current_heading is not None:
+            sections.append({
+                'heading': current_heading,
+                'level': current_heading.count('#'),
+                'content': '\n'.join(current_content).strip(),
+                'hierarchy_stack': title_stack.copy()
+            })
+        
+        # 处理没有标题的内容
+        if not sections and text.strip():
+            sections.append({
+                'heading': None,
+                'level': 0,
+                'content': text.strip(),
+                'hierarchy_stack': ["" for _ in range(6)]
+            })
         
         return sections
 
@@ -596,66 +628,29 @@ class AdSemanticDocumentChunker:
         Returns:
             逻辑语义块列表
         """
-        content = '\n'.join(section['content'])
-        
-        # 过滤空内容
+        content = section['content']
         if not content.strip():
             return []
-        
-        # 使用LogicalBlockSplitter进行分割
         blocks = self.logical_block_splitter.split_logical_blocks(content)
-        
-        # 为每个block添加section信息
         result = []
         for block in blocks:
-            if block['content'].strip():  # 只处理非空内容
+            if block['content'].strip():
+                hierarchy_dict = {}
+                for i in range(6):
+                    hierarchy_dict[f'h{i+1}'] = section['hierarchy_stack'][i] if section['hierarchy_stack'][i] else ""
                 result.append({
                     'heading': section['heading'],
                     'level': section['level'],
-                    'hierarchy': section['hierarchy'],
+                    'hierarchy': hierarchy_dict,
                     'sub_section': block['sub_section'],
-                    'content': block['content']
+                    'content': block['content']  # 只保留原始内容，不拼接chunk_type
                 })
-        
         return result
 
-    def _determine_content_type(self, heading: str, level: int, content: str) -> str:
-        """
-        动态确定content_type
-    
-    Args:
-            heading: 标题
-            level: 标题层级
-            content: 内容
-        
-    Returns:
-            content_type字符串
-        """
-        heading_lower = heading.lower()
-        content_lower = content.lower()
-        
-        # 根据标题关键词判断
-        if any(keyword in heading_lower for keyword in ['军队规则', 'army rule']):
-            return "army_rule"
-        elif any(keyword in heading_lower for keyword in ['分队规则', 'detachment rule']):
-            return "detachment_rule"
-        elif any(keyword in heading_lower for keyword in ['单位', 'unit']):
-            return "unit"
-        elif any(keyword in heading_lower for keyword in ['核心规则', 'core rule']):
-            return "corerule"
-        
-        # 根据内容关键词判断
-        if any(keyword in content_lower for keyword in ['模型底盘大小', '单位构成', '单位装备']):
-            return "unit"
-        elif any(keyword in content_lower for keyword in ['技能', '射击武器', '近战武器']):
-            return "unit"
-        
-        # 默认返回unit
-        return "unit"
 
     def _process_section_content(self, content: str, section_heading: str,
                                 section_level: int, hierarchy: Dict[str, str],
-                                content_type: str, additional_metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+                                sub_section: str, additional_metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         处理section内容，创建chunks
         
@@ -664,7 +659,7 @@ class AdSemanticDocumentChunker:
             section_heading: section标题
             section_level: section层级
             hierarchy: 层级信息
-            content_type: 内容类型
+            sub_section: 子章节类型
             additional_metadata: 额外的metadata
             
         Returns:
@@ -677,48 +672,28 @@ class AdSemanticDocumentChunker:
         # 创建chunk metadata
         chunk_metadata = self._create_chunk_metadata(
             content, section_heading, section_level, hierarchy,
-            content_type, additional_metadata
+            sub_section, additional_metadata
         )
         
         return [chunk_metadata]
 
     def _create_chunk_metadata(self, content: str, section_heading: str,
                               section_level: int, hierarchy: Dict[str, str],
-                              content_type: str, additional_metadata: Dict[str, Any]) -> Dict[str, Any]:
+                              sub_section: str, additional_metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
         创建chunk的metadata
-        
-        Args:
-            content: chunk内容
-            section_heading: section标题
-            section_level: section层级
-            hierarchy: 层级信息
-            content_type: 内容类型
-            additional_metadata: 额外的metadata
-            
-        Returns:
-            chunk的metadata字典
         """
         # 构建chunk_type
-        chunk_type = self._build_chunk_type(content_type, hierarchy)
-        
+        chunk_type = self._build_chunk_type(hierarchy)
         # 构建faction
-        faction = self._build_faction(content_type, hierarchy)
-        
-        # 获取sub_section
-        sub_section = additional_metadata.get('sub_section', 'basic')
-        
-        # 在text开头添加sub_section名称
-        if sub_section != 'basic':
-            text = f"{sub_section}:{content}"
-        else:
-            text = content
-        
+        faction = self._build_faction()
+        # text字段无条件拼接chunk_type和content，content左侧去空白
+        text = f"{chunk_type}.{content.lstrip()}"
         return {
             'text': text,
             'section_heading': section_heading,
             'chunk_type': chunk_type,
-            'content_type': content_type,
+            'content_type': 'basic',
             'faction': faction,
             'sub_section': sub_section,
             'h1': hierarchy.get('h1', ''),
@@ -729,51 +704,33 @@ class AdSemanticDocumentChunker:
             'h6': hierarchy.get('h6', '')
         }
 
-    def _build_chunk_type(self, content_type: str, hierarchy: Dict[str, str]) -> str:
+    def _build_chunk_type(self, hierarchy: Dict[str, str]) -> str:
         """
-        构建chunk_type
+        构建chunk_type - 直接拼接h1~h6的文本，过滤空值
         
         Args:
-            content_type: 内容类型
             hierarchy: 层级信息
             
         Returns:
             chunk_type字符串
         """
-        faction = self._build_faction(content_type, hierarchy)
+        parts = []
+        for i in range(6):
+            h_value = hierarchy.get(f'h{i+1}', '')
+            if h_value.strip():  # 只添加非空的层级
+                parts.append(h_value)
         
-        if content_type == "army_rule":
-            return f"{faction}军队规则-{hierarchy.get('h1', '')}"
-        elif content_type == "detachment_rule":
-            return f"{faction}分队规则-{hierarchy.get('h1', '')}"
-        elif content_type == "unit":
-            h1 = hierarchy.get('h1', '')
-            h2 = hierarchy.get('h2', '')
-            h3 = hierarchy.get('h3', '')
-            if h1 and h2 and h3:
-                return f"{faction}单位数据-{h1}-{h2}-{h3}"
-            elif h1 and h2:
-                return f"{faction}单位数据-{h1}-{h2}"
-            else:
-                return f"{faction}单位数据-{h1}"
-        elif content_type == "corerule":
-            return f"{faction}核心规则-{hierarchy.get('h1', '')}"
-        else:
-            return f"{faction}其他-{hierarchy.get('h1', '')}"
+        return '-'.join(parts) if parts else 'unknown'
 
-    def _build_faction(self, content_type: str, hierarchy: Dict[str, str]) -> str:
+    def _build_faction(self) -> str:
         """
         构建faction
         
-        Args:
-            content_type: 内容类型
-            hierarchy: 层级信息
-            
         Returns:
             faction字符串
         """
-        # 如果传入了faction_name，优先使用（包括空字符串）
-        if self.faction_name is not None and self.faction_name != "unknown":
+        # 如果传入了faction_name，优先使用
+        if self.faction_name is not None:
             return self.faction_name
         
         # 否则返回"unknown"
@@ -833,10 +790,19 @@ class AdSemanticDocumentChunker:
         if token_count <= self.max_tokens:
             return [chunk]
         
-        # 按句子分割
-        sentences = text.split('。')
+        # 获取chunk_type，用于重新拼接text前缀
+        chunk_type = chunk.get('chunk_type', '')
+        
+        # 提取原始content（去除chunk_type前缀）
+        if chunk_type and text.startswith(chunk_type + '.'):
+            original_content = text[len(chunk_type) + 1:]
+        else:
+            original_content = text
+        
+        # 按句子分割原始content
+        sentences = original_content.split('。')
         split_chunks = []
-        current_chunk_text = ""
+        current_content = ""
         current_chunk = chunk.copy()
         
         for sentence in sentences:
@@ -845,24 +811,27 @@ class AdSemanticDocumentChunker:
                 continue
             
             # 检查添加这个句子是否会超过限制
-            test_text = current_chunk_text + sentence + "。"
+            test_content = current_content + sentence + "。"
+            test_text = f"{chunk_type}.{test_content}" if chunk_type else test_content
             test_token_count = self._count_tokens(test_text)
             
             if test_token_count <= self.max_tokens:
-                current_chunk_text = test_text
+                current_content = test_content
             else:
                 # 保存当前chunk
-                if current_chunk_text:
-                    current_chunk['text'] = current_chunk_text.rstrip('。')
+                if current_content:
+                    final_text = f"{chunk_type}.{current_content.rstrip('。')}" if chunk_type else current_content.rstrip('。')
+                    current_chunk['text'] = final_text
                     split_chunks.append(current_chunk)
                 
                 # 开始新的chunk
-                current_chunk_text = sentence + "。"
+                current_content = sentence + "。"
                 current_chunk = chunk.copy()
         
         # 保存最后一个chunk
-        if current_chunk_text:
-            current_chunk['text'] = current_chunk_text.rstrip('。')
+        if current_content:
+            final_text = f"{chunk_type}.{current_content.rstrip('。')}" if chunk_type else current_content.rstrip('。')
+            current_chunk['text'] = final_text
             split_chunks.append(current_chunk)
         
         return split_chunks

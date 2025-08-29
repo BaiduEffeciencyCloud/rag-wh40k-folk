@@ -76,16 +76,12 @@ NEO4J_TEST_PASSWORD = os.getenv("NEO4J_TEST_PASSWORD")
 if not all([NEO4J_TEST_URI, NEO4J_TEST_USERNAME, NEO4J_TEST_PASSWORD]):
     logger.warning("Neo4j test configuration incomplete. Please set NEO4J_TEST_URI, NEO4J_TEST_USERNAME, and NEO4J_TEST_PASSWORD in .env file")
 
-# 模型配置
-DEFAULT_TOP_K = 25  # 默认返回结果数量
 
 
 # 答案生成配置
 DEFAULT_TEMPERATURE = 0.2  # 默认温度参数，控制生成文本的随机性
 MAX_ANSWER_TOKENS = 2000  # 答案生成最大token数
 
-# 结果整合配置
-DEDUPLICATION_THRESHOLD = 0.8  # 去重阈值，相似度超过此值视为重复
 
 # 并发配置
 DEFAULT_MAX_WORKERS = 4  # 默认RAGAS最大并发工作线程数
@@ -141,10 +137,10 @@ HYBRID_ALGORITHM = 'pipeline'
 
 # ========== RRF混合搜索配置 ==========
 # RRF (Reciprocal Rank Fusion) 算法参数配置
-RRF_RANK_CONSTANT = 10  # RRF排名常数，越小区分度越高，建议5-15
+RRF_RANK_CONSTANT = 8  # RRF排名常数，越小区分度越高，建议5-15
 RRF_WINDOW_MULTIPLIER = 3  # RRF窗口大小倍数，越大捕获文档越多，建议3-5
 RRF_MAX_WINDOW_SIZE = 300  # RRF窗口大小最大值，防止过大的计算开销
-RRF_SPARSE_TERMS_BOOST = 1.2  # RRF稀疏向量terms查询的boost值，提高稀疏向量查询权重
+RRF_SPARSE_TERMS_BOOST = 1.5  # RRF稀疏向量terms查询的boost值，提高稀疏向量查询权重
 RRF_DEFAULT_RANK_CONSTANT = 20  # 标准RRF常数，用于RRF算法中的平滑参数
 
 # RRF混合搜索权重配置
@@ -156,7 +152,7 @@ RRF_DENSE_WEIGHT = 1.2 # RRF密集向量查询权重
 PIPELINE_NORMALIZATION_TECHNIQUE = "min_max"  # 归一化技术：min_max, z_score, decimal_scaling, log_scale
 PIPELINE_COMBINATION_TECHNIQUE = "arithmetic_mean"  # 组合技术：arithmetic_mean, geometric_mean, harmonic_mean, weighted_sum
 PIPELINE_BM25_BOOST = 1.5  # BM25搜索boost值，影响BM25结果权重
-PIPELINE_VECTOR_BOOST = 0.8  # 向量搜索boost值，影响向量搜索结果权重
+PIPELINE_VECTOR_BOOST = 1.0  # 向量搜索boost值，影响向量搜索结果权重
 
 # ========== Match Phrase查询配置 ==========
 # Match Phrase查询算法参数配置
@@ -203,37 +199,33 @@ SEARCH_FIELD_WEIGHTS = {
     "section_heading": 1.0,    # 章节标题权重
     "sub_section": 1.3,        # 子章节权重（V4新增字段）
     "content_type": 1.0,       # 内容类型权重
-    "chunk_type": 1.0,         # 块类型权重
+    "chunk_type": 1.4,         # 块类型权重
     "faction": 1.0             # 阵营权重
 }
 
 # 标题权重配置
 HEADING_WEIGHTS = {
     'h1': 1.0,
-    'h2': 1.4,
-    'h3': 1.8,
-    'h4': 1.0,
+    'h2': 1.3,
+    'h3': 1.5,
+    'h4': 0.9,
     'h5': 0.8,
     'h6': 0.6
 }
 
-# 内容类型权重配置
-CONTENT_TYPE_WEIGHTS = {
-    'corerule': 1.5,
-    'unit_data': 1.3,
-}
+
 
 # 查询长度阈值配置
 QUERY_LENGTH_THRESHOLDS = {
-    'short': 4,
-    'medium': 8
+    'short': 12,
+    'medium': 20
 }
 
 # 正文权重配置
 BOOST_WEIGHTS = {
-    'long_query': 1.4,    # 长查询权重
+    'long_query': 1.5,    # 长查询权重
     'medium_query': 1.2,  # 中等查询权重
-    'short_query': 0.8    # 短查询权重
+    'short_query': 1.0    # 短查询权重
 }
 
 # rerank 模型
@@ -271,7 +263,6 @@ BM25_CACHE_SIZE = 1000  # 缓存大小
 
 # Pinecone稀疏向量限制
 PINECONE_MAX_SPARSE_VALUES = 2048  # Pinecone单个稀疏向量的最大非零元素数量
-PINECONE_SPARSE_DIMENSION = 10000  # Pinecone稀疏向量维度
 
 phrase_weight_scorer = PhraseWeightScorer(
     df_thresholds=(1, 2, 3),

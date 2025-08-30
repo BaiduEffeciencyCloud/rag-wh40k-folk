@@ -38,33 +38,129 @@ class LangchainLLMWrapper(LLM):
         json_keywords = ['statements', 'verdict', 'faithfulness', 'relevancy', 'correctness', 'analyze', 'judge', 'complexity']
         return any(keyword in prompt.lower() for keyword in json_keywords)
     
-    def _fix_json_format(self, response: str) -> str:
-        """修复JSON格式问题"""
+    def _validate_response_length(self, response: str, max_length: int = 8000) -> str:
+        """验证和截断过长的响应，防止极端情况导致解析失败"""
+        if not response or len(response) <= max_length:
+            return response
+
+        # 对于过长的响应，先尝试截断JSON结构
         try:
             parsed = json.loads(response)
-            
-            # 处理 {"text": ...} 格式
-            if 'text' in parsed:
-                return parsed['text']
-            
-            # 处理 {"statements": [...]} 格式（DeepSeek特有）
-            if 'statements' in parsed and isinstance(parsed['statements'], list):
-                return '\n'.join(parsed['statements'])
-            
-            # 处理其他可能的JSON格式
-            if isinstance(parsed, dict):
-                # 如果是字典，尝试提取第一个字符串值
-                for key, value in parsed.items():
-                    if isinstance(value, str):
-                        return value
-                    elif isinstance(value, list) and value and isinstance(value[0], str):
-                        return '\n'.join(value)
-            
-        except Exception as e:
-            # 如果JSON解析失败，返回原始响应
+            if isinstance(parsed, dict) and 'statements' in parsed:
+                # 智能截断statements数组
+                statements = parsed['statements']
+                if isinstance(statements, list):
+                    # 计算单个statement的平均长度
+                    if statements:
+                        avg_length = sum(len(str(s)) for s in statements) / len(statements)
+                        max_statements = int(max_length * 0.6 / avg_length)  # 保留60%的空间给其他字段
+                        if len(statements) > max_statements:
+                            parsed['statements'] = statements[:max_statements]
+                            parsed['truncated'] = True
+
+                    # 重新序列化为JSON
+                    truncated_response = json.dumps(parsed, ensure_ascii=False)
+                    if len(truncated_response) <= max_length:
+                        return truncated_response
+
+        except Exception:
             pass
-        
-        return response
+
+        # 如果JSON处理失败，直接截断字符串
+        return response[:max_length] + "..."
+
+    def _safe_json_parse(self, response: str) -> tuple:
+        """安全地解析JSON，返回 (success, parsed_data, error)"""
+        if not response or not isinstance(response, str):
+            return False, None, ValueError("Invalid response type")
+
+        try:
+            parsed = json.loads(response.strip())
+            if isinstance(parsed, dict):
+                return True, parsed, None
+            else:
+                return False, None, ValueError("Parsed data is not a dictionary")
+        except json.JSONDecodeError as e:
+            return False, None, e
+        except Exception as e:
+            return False, None, e
+
+    def _create_fallback_format(self, original_response: str) -> str:
+        """创建兜底的JSON格式，确保RAGAS能处理"""
+        # 清理原始响应中的特殊字符
+        cleaned_response = original_response.replace('\n', ' ').replace('\r', ' ').strip()
+
+        # 如果原始响应看起来已经是JSON的一部分，尝试提取文本内容
+        if '"text"' in original_response or '"statements"' in original_response:
+            # 尝试提取可能的文本内容
+            import re
+            text_matches = re.findall(r'"text"\s*:\s*"([^"]*)"', original_response)
+            if text_matches:
+                cleaned_response = text_matches[0]
+
+        # 创建标准的兜底格式
+        fallback_data = {
+            "text": cleaned_response[:2000] if len(cleaned_response) > 2000 else cleaned_response,
+            "fallback": True,
+            "original_length": len(original_response)
+        }
+
+        return json.dumps(fallback_data, ensure_ascii=False)
+
+    def _fix_json_format(self, response: str) -> str:
+        """修复JSON格式问题，确保符合RAGAS期望的StringIO格式"""
+        # Step4: 实现真实的逻辑代码
+
+        # 1. 首先验证和截断响应长度
+        response = self._validate_response_length(response)
+
+        # 2. 安全地解析JSON
+        success, parsed, error = self._safe_json_parse(response)
+
+        if not success:
+            # JSON解析失败，使用兜底格式
+            return self._create_fallback_format(response)
+
+        # 3. 处理已解析的JSON数据
+        if not isinstance(parsed, dict):
+            return self._create_fallback_format(response)
+
+        # 4. 修复QWEN statements格式 - 添加缺失的text字段
+        if 'statements' in parsed and isinstance(parsed['statements'], list):
+            if 'text' not in parsed:
+                # 过滤掉None值和空字符串
+                valid_statements = [str(s) for s in parsed['statements'] if s is not None and str(s).strip()]
+                parsed['text'] = '\n'.join(valid_statements)
+            return json.dumps(parsed, ensure_ascii=False)
+
+        # 5. 修复verdict格式 - 添加缺失的text字段
+        if 'verdict' in parsed and parsed['verdict'] is not None and 'text' not in parsed:
+            reason = parsed.get('reason', '')
+            if reason:
+                parsed['text'] = str(reason)
+            else:
+                parsed['text'] = str(parsed['verdict'])
+            return json.dumps(parsed, ensure_ascii=False)
+
+        # 6. 如果已经有text字段，直接返回
+        if 'text' in parsed:
+            return json.dumps(parsed, ensure_ascii=False)
+
+        # 7. 处理其他格式 - 尝试构建text字段
+        if isinstance(parsed, dict):
+            for key, value in parsed.items():
+                if isinstance(value, str) and value.strip():
+                    parsed['text'] = str(value)
+                    return json.dumps(parsed, ensure_ascii=False)
+                elif isinstance(value, list) and value:
+                    # 处理列表类型的值
+                    valid_items = [str(item) for item in value if item is not None and str(item).strip()]
+                    if valid_items:
+                        parsed['text'] = '\n'.join(valid_items)
+                        return json.dumps(parsed, ensure_ascii=False)
+
+        # 8. 如果所有修复都失败，使用兜底格式
+        return self._create_fallback_format(response)
     
     @property
     def _llm_type(self) -> str:

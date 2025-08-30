@@ -1,6 +1,6 @@
 from .agginterface import AggregationInterface
 from typing import Dict, Any
-from .dedup_agg import DedupAggregation
+from .agg import DynamicAggregation
 
 class AggFactory:
     _registry = {}
@@ -10,9 +10,18 @@ class AggFactory:
         cls._registry[name] = agg_cls
 
     @classmethod
-    def get_aggregator(cls, name: str) -> AggregationInterface:
+    def get_aggregator(cls, name: str = 'simple', template: str = 'default') -> AggregationInterface:
         if name not in cls._registry:
             raise ValueError(f"未注册聚合策略: {name}")
-        return cls._registry[name]()
+        # 兼容旧接口: 若聚合器支持template参数则传递，否则无参数
+        agg_cls = cls._registry[name]
+        try:
+            return agg_cls(template=template)
+        except TypeError:
+            return agg_cls()
 
-AggFactory.register('simple', DedupAggregation) 
+AggFactory.register('default', DynamicAggregation)
+AggFactory.register('query', DynamicAggregation)
+AggFactory.register('list', DynamicAggregation)
+AggFactory.register('compare', DynamicAggregation)
+AggFactory.register('rule', DynamicAggregation) 

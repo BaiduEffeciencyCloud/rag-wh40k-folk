@@ -10,6 +10,7 @@ import logging
 import numpy as np
 import joblib
 import os
+import threading
 from typing import Dict, List, Tuple, Any
 from sklearn.feature_extraction.text import TfidfVectorizer
 from difflib import SequenceMatcher
@@ -26,7 +27,7 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
     def __init__(self, config: Dict[str, Any]):
         """
         初始化增强特征提取器
-        
+
         Args:
             config: 配置字典
         """
@@ -36,12 +37,16 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         self.primary_keywords = self._init_primary_keywords()
         self.secondary_keywords = self._init_secondary_keywords()
         self.negative_keywords = self._init_negative_keywords()
-        
+
         # 初始化复杂度计算器
         self.complexity_calculator = ComplexityCalculator(config)
-        
+
         # 从配置文件读取evilgood_feature配置
         self._init_evilgood_feature_from_config()
+
+        # 线程锁，确保句向量模型只被加载一次
+        self._model_lock = threading.Lock()
+        self._model_loaded = False
         
     def _init_primary_keywords(self) -> Dict[str, List[str]]:
         """初始化主要关键词 - 从config.yaml读取intent_keywords"""
@@ -500,40 +505,47 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         return fused_features
     
     def get_sentence_embedding(self, sentences: List[str]) -> np.ndarray:
-        """获取批量句向量特征"""
-        if not hasattr(self, 'sentence_model'):
-            try:
-                from sentence_transformers import SentenceTransformer
-                enhanced_config = self.config.get('advanced_feature', {}).get('enhanced', {})
-                sentence_model = enhanced_config.get('sentence_model', 'shibing624/text2vec-base-chinese')
-                
-                # 从配置中获取网络设置
-                network_timeout = enhanced_config.get('network_timeout', 30)
-                allow_offline = enhanced_config.get('allow_offline', True)
-                fallback_to_zero = enhanced_config.get('fallback_to_zero', True)
-                
-                # 设置环境变量
-                import os
-                os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = str(network_timeout)
-                os.environ['HF_HUB_OFFLINE'] = '1' if allow_offline else '0'
-                
-                # 尝试加载模型
-                self.sentence_model = SentenceTransformer(sentence_model)
-                logger.info("句向量模型加载成功")
-                
-            except ImportError:
-                logger.warning("sentence-transformers未安装，使用零向量代替")
-                return np.zeros((len(sentences), 768))
-            except Exception as e:
-                logger.error(f"句向量模型加载失败: {e}")
-                if fallback_to_zero:
-                    logger.warning("将使用零向量代替句向量特征")
-                    # 设置一个标志，避免重复尝试加载
-                    self.sentence_model = None
-                    return np.zeros((len(sentences), 768))
-                else:
-                    # 如果不允许回退，则抛出异常
-                    raise e
+        """获取批量句向量特征（线程安全）"""
+        # 使用双重检查锁定模式确保线程安全
+        if not self._model_loaded:
+            with self._model_lock:
+                # 双重检查
+                if not self._model_loaded:
+                    try:
+                        from sentence_transformers import SentenceTransformer
+                        enhanced_config = self.config.get('advanced_feature', {}).get('enhanced', {})
+                        sentence_model = enhanced_config.get('sentence_model', 'shibing624/text2vec-base-chinese')
+
+                        # 从配置中获取网络设置
+                        network_timeout = enhanced_config.get('network_timeout', 30)
+                        allow_offline = enhanced_config.get('allow_offline', True)
+                        fallback_to_zero = enhanced_config.get('fallback_to_zero', True)
+
+                        # 设置环境变量
+                        import os
+                        os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = str(network_timeout)
+                        os.environ['HF_HUB_OFFLINE'] = '1' if allow_offline else '0'
+
+                        # 尝试加载模型
+                        self.sentence_model = SentenceTransformer(sentence_model)
+                        self._model_loaded = True
+                        logger.info("句向量模型加载成功")
+
+                    except ImportError:
+                        logger.warning("sentence-transformers未安装，使用零向量代替")
+                        self.sentence_model = None
+                        self._model_loaded = True  # 标记为已处理
+                        return np.zeros((len(sentences), 768))
+                    except Exception as e:
+                        logger.error(f"句向量模型加载失败: {e}")
+                        if fallback_to_zero:
+                            logger.warning("将使用零向量代替句向量特征")
+                            self.sentence_model = None
+                            self._model_loaded = True  # 标记为已处理
+                            return np.zeros((len(sentences), 768))
+                        else:
+                            # 如果不允许回退，则抛出异常
+                            raise e
         
         # 如果模型加载失败，直接返回零向量
         if self.sentence_model is None:

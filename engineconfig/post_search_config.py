@@ -4,7 +4,6 @@ Post-Search 策略配置文件
 """
 
 # 处理器参数配置
-from config import RERANK_MODEL
 from typing import Dict, List, Any
 
 # Post-Search 策略配置

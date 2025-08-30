@@ -1,6 +1,7 @@
 from .openai import OpenAILLM
 from .deepseek import DeepSeekLLM
 from .gemini import GeminiLLM
+from .qwen import QwenLLM
 from config import OPENAI_API_KEY
 
 # 可选导入，如果配置中没有这些API密钥，则设为None
@@ -14,6 +15,11 @@ try:
 except ImportError:
     GEMINI_API_KEY = None
 
+try:
+    from config import QWEN_API_KEY
+except ImportError:
+    QWEN_API_KEY = None
+
 class LLMFactory:
     """LLM工厂类，用于创建不同类型的LLM实例"""
     
@@ -23,7 +29,7 @@ class LLMFactory:
         创建LLM实例
         
         Args:
-            llm_type: LLM类型 ("openai", "deepseek", "gemini")
+            llm_type: LLM类型 ("openai", "deepseek", "gemini", "qwen")
             **kwargs: 传递给具体LLM类的参数
             
         Returns:
@@ -41,6 +47,11 @@ class LLMFactory:
             return DeepSeekLLM(**deepseek_kwargs)
         elif llm_type.lower() == "gemini":
             return GeminiLLM(**kwargs)
+        elif llm_type.lower() == "qwen":
+            # QwenLLM只接受api_key, default_model, base_url参数
+            qwen_kwargs = {k: v for k, v in kwargs.items() 
+                          if k in ['api_key', 'default_model', 'base_url']}
+            return QwenLLM(**qwen_kwargs)
         else:
             raise ValueError(f"不支持的LLM类型: {llm_type}")
     

@@ -31,7 +31,7 @@ def main():
     parser.add_argument('--query', type=str, default='', help='用户查询')
     parser.add_argument('--qp', type=str, choices=['straight', 'expand', 'cot'], default='straight', help='query processor类型')
     parser.add_argument('--se', type=str, choices=['dense', 'sparse','hybrid'], default='dense', help='search engine类型')
-    parser.add_argument('--agg', type=str, default='simple', help='答案聚合器类型（预留）')
+    parser.add_argument('--agg', type=str, default='default', help='答案聚合器类型（预留）')
     parser.add_argument('--topk', type=int, default=5, help='检索返回数量')
     parser.add_argument('--ps', type=str,default='simple',help='对召回 TOP_K的处理')
     parser.add_argument('--rerank', action='store_true', help='是否启用rerank')
@@ -65,7 +65,7 @@ def main():
 
     # 3. 组装聚合器
     agg_type = args.agg
-    aggregator = AggFactory.get_aggregator(agg_type)
+    aggregator = AggFactory.get_aggregator(agg_type, template=agg_type)
 
     ps_type = args.ps
     postsearch = PostSearchFactory.create_processor(ps_type)

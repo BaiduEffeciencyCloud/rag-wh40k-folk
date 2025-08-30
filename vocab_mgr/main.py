@@ -11,7 +11,8 @@ import logging
 import argparse
 from datetime import datetime
 from typing import Dict, Any, List
-
+from dataupload.data_vector_v3 import SemanticDocumentChunker
+  
 # 添加项目根目录到sys.path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
@@ -20,6 +21,7 @@ if project_root not in sys.path:
 from vocab_mgr.vocab_extractor import VocabExtractor
 from vocab_mgr.vocab_mgr import VocabMgr
 from vocab_mgr.vocab_updater import VocabUp
+from vocab_mgr.vocab_loader import VocabLoad
 
 # 设置日志
 logging.basicConfig(
@@ -39,6 +41,8 @@ def parse_arguments():
     parser.add_argument('--update-dict', action='store_true', help='更新词典文件')
     parser.add_argument('--overwrite', '--ow', action='store_true', help='强制覆盖现有词典记录')
     parser.add_argument('--vocab-path', default='dict/wh40k_vocabulary', help='词典路径')
+    parser.add_argument('--export', action='store_true', help='导出OpenSearch分析器格式文件')
+    parser.add_argument('--output', default='docker/opensearch-config/analysis/', help='OpenSearch配置文件输出目录')
     
     if len(sys.argv) == 1:
         parser.print_help()
@@ -64,8 +68,7 @@ def load_document(doc_path: str) -> str:
 def chunk_document(text: str) -> List[Dict[str, Any]]:
     """使用SemanticDocumentChunker进行文档切片"""
     try:
-        from dataupload.data_vector_v3 import SemanticDocumentChunker
-        
+      
         chunker = SemanticDocumentChunker()
         logger.info("开始文档切片...")
         
@@ -283,6 +286,20 @@ def main():
         # 6. 保存结果文件（如果指定）
         if args.save_output:
             save_results_to_file(extracted_terms, args.output_path)
+        
+        # 7. 导出OpenSearch格式（如果指定）
+        if args.export:
+            from vocab_mgr.vocab_loader import VocabLoad
+            vocab_loader = VocabLoad(vocab_path=args.vocab_path)
+            export_result = vocab_loader.export_for_opensearch(args.output)
+            
+            if export_result["success"]:
+                logger.info("OpenSearch格式导出成功")
+                logger.info(f"术语文件: {export_result['dict_file']}")
+                logger.info(f"同义词文件: {export_result['synonyms_file']}")
+                logger.info(f"导出统计: {export_result['stats']}")
+            else:
+                logger.error(f"OpenSearch格式导出失败: {export_result['message']}")
         
         logger.info("处理完成")
         

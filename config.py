@@ -101,8 +101,8 @@ USE_EXPONENTIAL_BACKOFF = True  # 是否使用指数退避策略
 BACKOFF_FACTOR = 2.0  # 退避因子
 MAX_BACKOFF_DELAY = 30.0  # 最大退避延迟（秒）
 
-# LLM类型,包括 Openai, Deepseek, Gemini
-LLM_TYPE="deepseek"
+# LLM类型,包括 Openai, Deepseek, Gemini,QWEN
+LLM_TYPE="qwen"
 # OPEN AI LLM模型
 LLM_MODEL = "gpt-4o"  # OpenAI LLM模型名称
 LLM_IMAGE_MODEL = "gpt-4o"  # OpenAI图像模型名称
@@ -112,14 +112,17 @@ OPENAI_DIMENSION = 2048  # OpenAI嵌入向量维度
 
 # QWEN AI LLM 模型
 EMBEDDING_MODEL_QWEN = "text-embedding-v4"  # QWEN嵌入模型名称
-RERANK_MODEL_QWEN = "text-embedding-v4"  # QWEN重排序模型名称
 QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")  # QWEN API密钥（保留环境变量）
 QWEN_DIMENSION = 2048  # QWEN嵌入向量维度
+QWEN_LLM_SERVER = "https://dashscope.aliyuncs.com/compatible-mode/v1" #QWEN 服务器地址
+QWEN_LLM_MODEL = "qwen-plus" #QWEN 模型名称
+
 
 # DEEPSEEK API配置
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_SERVER="https://api.deepseek.com/v1"
 DEEPSEEK_MODEL="deepseek-chat"
+
 
 #检索分析调试配置
 DEBUG_ANALYZE = True  # 搜索分析调试开关，默认关闭
@@ -130,7 +133,7 @@ SEARCH_ANALYSIS_LOG_MAX_SIZE = 5 * 1024 * 1024  # 搜索分析日志最大文件
 # Hybrid检索配置
 #当 α = 0 时，完全依赖稀疏检索（纯 BM25/TF-IDF）；
 #当 α = 1 时，完全依赖密集检索（纯语义向量匹配）；
-HYBRID_ALPHA = 0.3
+HYBRID_ALPHA = 0.4
 # 混合搜索算法选择
 # 可选值: 'pipeline' (默认) 或 'rrf'
 HYBRID_ALGORITHM = 'pipeline'
@@ -197,20 +200,20 @@ OPENSEARCH_SEARCH_ANALYZER = "warhammer_search_analyzer"    # 搜索时使用的
 # 搜索字段权重配置
 SEARCH_FIELD_WEIGHTS = {
     "section_heading": 1.0,    # 章节标题权重
-    "sub_section": 1.3,        # 子章节权重（V4新增字段）
+    "sub_section": 1.2,        # 子章节权重（V4新增字段）
     "content_type": 1.0,       # 内容类型权重
     "chunk_type": 1.4,         # 块类型权重
-    "faction": 1.0             # 阵营权重
+    "faction": 1.3             # 阵营权重
 }
 
 # 标题权重配置
 HEADING_WEIGHTS = {
     'h1': 1.0,
-    'h2': 1.3,
-    'h3': 1.5,
-    'h4': 0.9,
-    'h5': 0.8,
-    'h6': 0.6
+    'h2': 1.5,
+    'h3': 1.6,
+    'h4': 0.6,
+    'h5': 0.5,
+    'h6': 0.4
 }
 
 
@@ -223,9 +226,9 @@ QUERY_LENGTH_THRESHOLDS = {
 
 # 正文权重配置
 BOOST_WEIGHTS = {
-    'long_query': 1.5,    # 长查询权重
+    'long_query': 1.4,    # 长查询权重
     'medium_query': 1.2,  # 中等查询权重
-    'short_query': 1.0    # 短查询权重
+    'short_query': 1.2    # 短查询权重
 }
 
 # rerank 模型

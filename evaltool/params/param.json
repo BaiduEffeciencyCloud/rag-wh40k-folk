@@ -1,6 +1,6 @@
 {
-    "query_file":"test_data/fail_q.csv",
-    "gold_file":"test_data/fail_qa.csv",
+    "query_file":"test_data/search_codex_Q.csv",
+    "gold_file":"test_data/search_codex_QA.csv",
     "top_k":60,
     "output_dir":"report",
     "qp_type":"straight",

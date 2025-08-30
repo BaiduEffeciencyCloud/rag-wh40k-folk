@@ -2,7 +2,7 @@ import os
 import pinecone
 from openai import OpenAI
 import logging
-from config import RERANK_MODEL
+from config import ALIYUN_RERANK_MODEL   
 from typing import Dict, Any, List, Union
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class BaseSearchEngine:
             results.append(result)
         return results
 
-    def pineconeRerank(self, query: str, candidates: List[Dict], top_k: int = 5, model: str = RERANK_MODEL, **kwargs) -> List[Dict]:
+    def pineconeRerank(self, query: str, candidates: List[Dict], top_k: int = 5, model: str = ALIYUN_RERANK_MODEL, **kwargs) -> List[Dict]:
         # 1. 提取所有 text（兼容 Pinecone 返回结构）
         text2item = {item['metadata']['text']: item for item in candidates if 'metadata' in item and 'text' in item['metadata']}
         documents = list(text2item.keys())

@@ -269,7 +269,7 @@ class OpenSearchConnection(ConnectionInterface):
                     # 将OpenSearch响应转换为rerank期望的格式
                     candidates = self._convert_response_to_rerank_candidates(response)
                     if candidates:
-                        rerank_results = self.rerank(query, candidates, RERANK_TOPK)
+                        rerank_results = self.rerank(query, candidates, RERANK_TOPK,ALIYUN_RERANK_MODEL)
                         # 将rerank结果转换回OpenSearch格式
                         return self._convert_rerank_results_to_opensearch_format(rerank_results, response)
                     else:

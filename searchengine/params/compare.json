@@ -1,0 +1,9 @@
+{
+  "QUERY_LENGTH_THRESHOLDS": {"short": 12, "medium": 20},
+  "BOOST_WEIGHTS": {"long_query": 1.4, "medium_query": 1.2, "short_query": 1.2},
+  "MATCH_PHRASE_CONFIG": "详见config.py",
+  "HEADING_WEIGHTS": "详见config.py",
+  "SEARCH_FIELD_WEIGHTS": "详见config.py",
+  "OPENSEARCH_INDEX": "40ktest"
+
+}

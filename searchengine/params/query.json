@@ -1,0 +1,6 @@
+{
+  "ALIYUN_RERANK_MODEL": "gte-rerank-v2",
+  "RERANK_TOPK": 25,
+  "OPENSEARCH_SEARCH_ANALYZER": "warhammer_search_analyzer",
+  "OPENSEARCH_INDEX": "40ktest"
+}

@@ -1,0 +1,5 @@
+{
+  "OPENSEARCH_INDEX": "40ktest",
+  "QUERY_LENGTH_THRESHOLDS": {"short": 12, "medium": 20},
+  "ENABLE_PIPELINE_CACHE": null
+}

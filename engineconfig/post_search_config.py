@@ -25,7 +25,7 @@ PROCESSOR_CONFIGS = {
         
         # 相关性过滤参数（实际使用）
         'relevance_threshold': 0.2,    # 相关性阈值，低于此值的结果被过滤
-        'enable_relevance_filter': True,  # 是否启用相关性过滤
+        'enable_relevance_filter': False,  # 是否启用相关性过滤
         
         # Score标准化参数（实际使用）
         'enable_score_normalization': True,  # 是否启用score标准化

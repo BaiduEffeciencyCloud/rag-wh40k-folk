@@ -70,7 +70,6 @@ class DynamicAggregation(AggregationInterface):
             # 5. 如果default.json也为空，兜底只输出context和query
             if not user_prompt.strip():
                 user_prompt = f"上下文信息:{context_str}\n用户问题：\"{query_str}\""
-            logger.info(f"user_prompt: {user_prompt}")
             # 6. 使用build_messages组合为List，确保包含type字段
             messages = build_messages(
                 system_prompt={"content": system_prompt, "type": "text"},

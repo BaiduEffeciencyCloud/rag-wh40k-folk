@@ -133,7 +133,7 @@ SEARCH_ANALYSIS_LOG_MAX_SIZE = 5 * 1024 * 1024  # 搜索分析日志最大文件
 # Hybrid检索配置
 #当 α = 0 时，完全依赖稀疏检索（纯 BM25/TF-IDF）；
 #当 α = 1 时，完全依赖密集检索（纯语义向量匹配）；
-HYBRID_ALPHA = 0.4
+HYBRID_ALPHA = 0.5
 # 混合搜索算法选择
 # 可选值: 'pipeline' (默认) 或 'rrf'
 HYBRID_ALGORITHM = 'pipeline'
@@ -286,3 +286,6 @@ APP_HEADER = os.getenv("APP_HEADER", "")
 # 默认输入输出目录常量
 INPUT_DIR = 'test/testdata'
 OUTPUT_DIR = 'dict' 
+
+# 词典的导出位置
+VOCAB_EXPORT_DIR = 'dict/wh40k_vocabulary'

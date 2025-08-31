@@ -7,7 +7,8 @@
 import os
 import json
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
+from config import VOCAB_EXPORT_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -220,15 +221,18 @@ class VocabLoad:
         
         return vocabulary
 
-    def export_for_opensearch(self, output_dir: str = "docker/opensearch-config/analysis/") -> Dict[str, Any]:
+    def export_for_opensearch(self, output_dir: str = None) -> Dict[str, Any]:
         """导出OpenSearch分析器格式文件"""
+        from config import VOCAB_EXPORT_DIR
         try:
             logger.info("开始导出OpenSearch分析器格式文件")
             logger.info(f"输出目录: {output_dir}")
             
             # 参数验证
+            if output_dir is None:
+                output_dir = VOCAB_EXPORT_DIR
             if not output_dir:
-                output_dir = "docker/opensearch-config/analysis/"
+                output_dir = VOCAB_EXPORT_DIR
             
             # 确保输出目录存在
             if not os.path.exists(output_dir):

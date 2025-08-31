@@ -406,7 +406,7 @@ def main():
     parser = argparse.ArgumentParser(description="文档入库流程管理器")
     parser.add_argument("file_path", type=str, help="要处理的文档路径")
     parser.add_argument("--env", type=str, default="production", choices=["production", "test", "development"], help="运行环境")
-    parser.add_argument("-cv", "--chunker-version", type=str, default="v3", choices=["v3", "v4"], help="选择使用的切片器版本 (v2/v3/v4)")
+    parser.add_argument("--cv", "--chunker-version", type=str, default="v3", choices=["v3", "v4"], help="选择使用的切片器版本 (v2/v3/v4)")
     parser.add_argument("--no-kg", action="store_true", help="禁用知识图谱写入")
     parser.add_argument("--db", type=str, default="opensearch", choices=["pinecone", "opensearch"], help="选择使用的数据库")
     parser.add_argument("--faction", type=str, help="指定faction（可选，优先级最高）")

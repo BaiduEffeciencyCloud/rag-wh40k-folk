@@ -21,7 +21,7 @@ class RAGOrchestrator:
         self.agg = aggregator
         self.post_search = post_search
 
-    def run(self, query: str, top_k: int = 5, db_type: str = None, embedding_model: str = None, rerank: bool = True, **kwargs) -> Any:
+    def run(self, query: str, intent: str, top_k: int = 5, db_type: str = None, embedding_model: str = None, rerank: bool = True, **kwargs) -> Any:
         """
         RAG主流程调度：处理query、检索、聚合，返回最终结果。
         
@@ -70,7 +70,7 @@ class RAGOrchestrator:
                 raise RuntimeError(f"无法创建嵌入模型 {embedding_model}: {str(e)}")
         
         # 3. 检索召回
-        results = self.se.search(processed, top_k=top_k, 
+        results = self.se.search(processed, intent, top_k=top_k, 
                                db_conn=db_conn_instance, 
                                embedding_model=embedding_instance,
                                rerank=rerank,

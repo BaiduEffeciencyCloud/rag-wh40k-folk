@@ -19,7 +19,12 @@
   },
   "QUERY_WEIGHT": {
     "QUERY_LENGTH_THRESHOLDS": {"short": 12, "medium": 20},
-    "BOOST_WEIGHTS": {"long_query": 1.4, "medium_query": 1.2, "short_query": 1.2},
+    "BOOST_WEIGHTS": 
+    {
+        "long_query": 1.4, 
+        "medium_query": 1.2, 
+        "short_query": 1.2
+    },
     "MATCH_PHRASE_CONFIG": {
       "enabled": true,
       "default_boost": 1.5,

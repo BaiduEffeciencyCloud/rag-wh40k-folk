@@ -6,7 +6,7 @@ class SearchEngineInterface(ABC):
     """搜索引擎接口"""
     
     @abstractmethod
-    def search(self, query: Union[str, Dict[str, Any]], top_k: int = 10, 
+    def search(self, query: Union[str, Dict[str, Any]], intent: str, top_k: int = 10, 
                db_conn=None, embedding_model=None, **kwargs) -> List[Dict[str, Any]]:
         """
         执行搜索

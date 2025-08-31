@@ -29,6 +29,7 @@ def print_separator(title: str):
 def main():
     parser = argparse.ArgumentParser(description="RAG SearchController 主流程")
     parser.add_argument('--query', type=str, default='', help='用户查询')
+    parser.add_argument('--intent', type=str, default='default', help='用户查询意图')
     parser.add_argument('--qp', type=str, choices=['straight', 'expand', 'cot'], default='straight', help='query processor类型')
     parser.add_argument('--se', type=str, choices=['dense', 'sparse','hybrid'], default='dense', help='search engine类型')
     parser.add_argument('--agg', type=str, default='default', help='答案聚合器类型（预留）')
@@ -55,6 +56,7 @@ def main():
     print(f"embedding模型: {args.embedding_model}")
     print(f"topk: {args.topk}")
 
+    intent="default"
 
     qp_type = args.qp
     query_processor = QueryProcessorFactory.create_processor(qp_type)
@@ -78,7 +80,7 @@ def main():
     orchestrator = RAGOrchestrator(query_processor, search_engine, postsearch, aggregator)
 
     # 5. 主流程统一调度（通过run方法传递db_type、embedding_model和rerank参数）
-    result = orchestrator.run(args.query, top_k=top_k, db_type=db_type, embedding_model=embedding_model, rerank=rerank_enabled)
+    result = orchestrator.run(args.query, intent=intent, top_k=top_k, db_type=db_type, embedding_model=embedding_model, rerank=rerank_enabled)
 
     print_separator("Orchestrator 聚合结果")
     #print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -203,12 +203,13 @@ class OpenSearchConnection(ConnectionInterface):
             self.logger.error(error_msg)
             raise Exception(error_msg)
         
-    def hybrid_search(self, query: str, filter: dict = None, top_k: int = 20, rerank: bool = False, **kwargs) -> dict:
+    def hybrid_search(self, query: str, intent: str, filter: dict = None, top_k: int = 20, rerank: bool = False, **kwargs) -> dict:
         """
         执行混合搜索的统一接口
         
         Args:
             query: 查询文本
+            intent: 意图
             filter: 过滤条件
             top_k: 返回结果数量
             rerank: 是否启用rerank，默认False
@@ -221,6 +222,7 @@ class OpenSearchConnection(ConnectionInterface):
             dict: 原始的 OpenSearch hits 字典，如果启用rerank则返回rerank后的结果
         """
         try:
+            logging.info(f"Hybrid搜索开始，查询: {query}，意图: {intent}")
             # 优先使用传入的算法参数，如果没有则使用配置默认值
             algorithm = kwargs.get('algorithm', HYBRID_ALGORITHM)
             
@@ -1044,7 +1046,7 @@ class OpenSearchConnection(ConnectionInterface):
                 # 检查 response 的基本结构
                 if hasattr(response, 'output') and hasattr(response.output, 'results'):
                     results = response.output.results
-                    self.logger.info(f"找到 {len(results)} 个重排序结果")
+                    #self.logger.info(f"找到 {len(results)} 个重排序结果")
                     
                     # 处理每个结果
                     for i, result in enumerate(results):
@@ -2050,7 +2052,7 @@ class OpenSearchConnection(ConnectionInterface):
             if filter:
                 debug_query["hybrid"]["filter"] = filter
             
-            self.logger.info(f"构建的混合搜索查询类型: {json.dumps(debug_query, ensure_ascii=False, indent=2)}")
+            #self.logger.info(f"构建的混合搜索查询类型: {json.dumps(debug_query, ensure_ascii=False, indent=2)}")
             if filter:
                 self.logger.info(f"应用的过滤条件: {json.dumps(filter, ensure_ascii=False, indent=2)}")
         

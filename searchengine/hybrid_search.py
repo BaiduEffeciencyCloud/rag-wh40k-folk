@@ -86,7 +86,7 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             logger.warning(f"生成sparse向量失败: {str(e)}")
             raise
 
-    def search(self, query: Union[str, Dict[str, Any]], top_k: int = 10, **kwargs) -> List[Dict[str, Any]]:
+    def search(self, query, intent: str, top_k=10, db_conn=None, embedding_model=None, rerank=True, **kwargs):
         """
         执行hybrid搜索（dense+sparse）
         Args:
@@ -111,20 +111,21 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
         # 获取关键参数
         filter_dict = kwargs.get('filter', {})
         alpha = kwargs.get('alpha', HYBRID_ALPHA)
-        db_conn = kwargs.get('db_conn')
-        embedding_model = kwargs.get('embedding_model')
+        # db_conn 和 embedding_model 都是方法参数，不要从kwargs重新获取！
+        # db_conn = kwargs.get('db_conn')  # 这行也会导致None覆盖！
+        # embedding_model = kwargs.get('embedding_model')  # 这行导致了None覆盖！
         rerank = kwargs.get('rerank', True)  # 添加rerank参数支持
-        
+        query_intent = intent
         # 根据配置选择算法
         algorithm = kwargs.get('algorithm', HYBRID_ALGORITHM)
         
         try:
             if algorithm == 'rrf':
                 # 使用RRF算法
-                results = self._search_with_rrf(query_text, filter_dict, top_k, alpha, db_conn, embedding_model, rerank=rerank)
+                results = self._search_with_rrf(query_text,query_intent,filter_dict, top_k, alpha, db_conn, embedding_model, rerank=rerank)
             else:
                 # 使用现有pipeline算法（默认）
-                results = self._search_with_pipeline(query_text, filter_dict, top_k, alpha, db_conn, embedding_model, rerank=rerank)
+                results = self._search_with_pipeline(query_text,query_intent,filter_dict, top_k, alpha, db_conn, embedding_model, rerank=rerank)
             
             # 格式化结果，保持search_type为'hybrid'供后续模块使用
             final_results = self._format_without_rerank(results, query_text, 'hybrid')
@@ -182,7 +183,7 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             logger.error(f"Dense检索降级失败: {str(e)}")
             return []
     
-    def _search_with_rrf(self, query_text: str, filter_dict: dict, top_k: int, alpha: float, db_conn, embedding_model, rerank: bool = False) -> List[Dict[str, Any]]:
+    def _search_with_rrf(self, query_text: str, intent:str,filter_dict: dict, top_k: int, alpha: float, db_conn, embedding_model, rerank: bool = False) -> List[Dict[str, Any]]:
         """
         使用RRF算法执行混合搜索
         """
@@ -209,6 +210,7 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             if db_conn and hasattr(db_conn, 'hybrid_search'):
                 response = db_conn.hybrid_search(
                     query=query_text,
+                    intent=intent,
                     filter=filter_dict,
                     top_k=top_k,
                     rerank=rerank,
@@ -248,7 +250,7 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             logger.warning(f"RRF混合检索失败: {str(e)}，降级为dense检索")
             return self._fallback_to_dense(query_text, top_k, filter_dict, db_conn, embedding_model)
     
-    def _search_with_pipeline(self, query_text: str, filter_dict: dict, top_k: int, alpha: float, db_conn, embedding_model, rerank: bool = False) -> List[Dict[str, Any]]:
+    def _search_with_pipeline(self, query_text: str,intent:str, filter_dict: dict, top_k: int, alpha: float, db_conn, embedding_model, rerank: bool = False) -> List[Dict[str, Any]]:
         """
         使用现有pipeline算法执行混合搜索
         """
@@ -265,6 +267,7 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
                 # 使用统一接口执行混合搜索
                 response = db_conn.hybrid_search(
                     query=query_text,
+                    intent=intent,
                     filter=filter_dict,
                     top_k=top_k,
                     rerank=rerank,

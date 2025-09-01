@@ -18,14 +18,14 @@ POST_SEARCH_STRATEGIES = {
 PROCESSOR_CONFIGS = {
     'mmr': {
         'enabled': True,
-        'lambda_param': 0.6,  # MMR参数，平衡相关性和多样性的平衡 (0=纯多样性, 1=纯相关性)
-        'select_n': 25,       # 最终选择的文档数量
+        'lambda_param': 0.7,  # MMR参数，平衡相关性和多样性的平衡 (0=纯多样性, 1=纯相关性)
+        'select_n': 18,       # 最终选择的文档数量
         'enable_mmr': True,   # 是否启用MMR处理
         'min_text_length': 10, # 处理的最小文本长度
         
         # 相关性过滤参数（实际使用）
-        'relevance_threshold': 0.2,    # 相关性阈值，低于此值的结果被过滤
-        'enable_relevance_filter': False,  # 是否启用相关性过滤
+        'relevance_threshold': 0.3,    # 相关性阈值，低于此值的结果被过滤
+        'enable_relevance_filter': True,  # 是否启用相关性过滤
         
         # Score标准化参数（实际使用）
         'enable_score_normalization': True,  # 是否启用score标准化
@@ -72,7 +72,7 @@ PROCESSOR_CONFIGS = {
     },
     'dedup': {
         'enabled': True,
-        'similarity_threshold': 0.9,  # 去重相似度阈值
+        'similarity_threshold': 0.8,  # 去重相似度阈值
         'method': 'semantic',  # 去重方法：semantic/text_hash
         'preserve_order': True,  # 是否保持原始顺序
     }

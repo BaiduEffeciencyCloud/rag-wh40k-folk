@@ -7,7 +7,8 @@
     "PIPELINE_VECTOR_BOOST": 1.0,
     "PIPELINE_NORMALIZATION_TECHNIQUE": "min_max",
     "PIPELINE_COMBINATION_TECHNIQUE": "arithmetic_mean",
-    "ENABLE_PIPELINE_CACHE": false
+    "ENABLE_PIPELINE_CACHE": false,
+    "OPENSEARCH_SEARCH_ANALYZER": "warhammer_search_analyzer"
   },
   "RRF_CONF": {
     "RRF_SPARSE_TERMS_BOOST": 1.5,

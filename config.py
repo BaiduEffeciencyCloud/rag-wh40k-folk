@@ -127,28 +127,28 @@ DEEPSEEK_MODEL="deepseek-chat"
 #检索分析调试配置
 DEBUG_ANALYZE = True  # 搜索分析调试开关，默认关闭
 # 搜索分析日志配置
-SEARCH_ANALYSIS_LOG_FILE = "log/search_analysis.log"  # 搜索分析日志文件路径
-SEARCH_ANALYSIS_LOG_MAX_SIZE = 5 * 1024 * 1024  # 搜索分析日志最大文件大小（5MB）
+#SEARCH_ANALYSIS_LOG_FILE = "log/search_analysis.log"  # 搜索分析日志文件路径
+#SEARCH_ANALYSIS_LOG_MAX_SIZE = 5 * 1024 * 1024  # 搜索分析日志最大文件大小（5MB）
 
 # Hybrid检索配置
 #当 α = 0 时，完全依赖稀疏检索（纯 BM25/TF-IDF）；
 #当 α = 1 时，完全依赖密集检索（纯语义向量匹配）；
-HYBRID_ALPHA = 0.5
+# HYBRID_ALPHA = 0.6
 # 混合搜索算法选择
 # 可选值: 'pipeline' (默认) 或 'rrf'
-HYBRID_ALGORITHM = 'pipeline'
+#HYBRID_ALGORITHM = 'pipeline'
 
 # ========== RRF混合搜索配置 ==========
 # RRF (Reciprocal Rank Fusion) 算法参数配置
-RRF_RANK_CONSTANT = 8  # RRF排名常数，越小区分度越高，建议5-15
-RRF_WINDOW_MULTIPLIER = 3  # RRF窗口大小倍数，越大捕获文档越多，建议3-5
-RRF_MAX_WINDOW_SIZE = 300  # RRF窗口大小最大值，防止过大的计算开销
-RRF_SPARSE_TERMS_BOOST = 1.5  # RRF稀疏向量terms查询的boost值，提高稀疏向量查询权重
-RRF_DEFAULT_RANK_CONSTANT = 20  # 标准RRF常数，用于RRF算法中的平滑参数
+#RRF_RANK_CONSTANT = 8  # RRF排名常数，越小区分度越高，建议5-15
+#RRF_WINDOW_MULTIPLIER = 3  # RRF窗口大小倍数，越大捕获文档越多，建议3-5
+#RRF_MAX_WINDOW_SIZE = 300  # RRF窗口大小最大值，防止过大的计算开销
+#RRF_SPARSE_TERMS_BOOST = 1.5  # RRF稀疏向量terms查询的boost值，提高稀疏向量查询权重
+#RRF_DEFAULT_RANK_CONSTANT = 20  # 标准RRF常数，用于RRF算法中的平滑参数
 
 # RRF混合搜索权重配置
-RRF_SPARSE_WEIGHT = 0.8  # RRF稀疏向量查询权重
-RRF_DENSE_WEIGHT = 1.2 # RRF密集向量查询权重
+#RRF_SPARSE_WEIGHT = 0.8  # RRF稀疏向量查询权重
+#RRF_DENSE_WEIGHT = 1.2 # RRF密集向量查询权重
 
 # ========== Pipeline混合搜索配置 ==========
 # Pipeline混合搜索算法参数配置

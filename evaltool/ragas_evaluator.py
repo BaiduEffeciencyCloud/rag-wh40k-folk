@@ -195,8 +195,63 @@ class RAGASEvaluator:
             configured_metrics.append(metric)
         return configured_metrics
     
+    def validate_sample(self, question: str, contexts: List[str], answer: str, ground_truth: str) -> tuple[bool, str]:
+        """
+        验证样本数据完整性
+        
+        Args:
+            question: 查询问题
+            contexts: 检索上下文列表
+            answer: 生成答案
+            ground_truth: 标准答案
+            
+        Returns:
+            tuple[bool, str]: (是否有效, 错误信息)
+        """
+        if not question or question.strip() == "":
+            return False, "查询问题为空"
+        if not ground_truth or ground_truth.strip() == "":
+            return False, "标准答案为空"
+        if not answer or answer.strip() == "":
+            return False, "生成答案为空"
+        if not contexts or len(contexts) == 0:
+            return False, "上下文为空"
+        return True, "数据有效"
+    
+    def safe_extract_metric(self, results, metric_name: str, default_value: float = 0.0) -> float:
+        """
+        安全提取指标值，处理nan情况
+        
+        Args:
+            results: RAGAS评估结果
+            metric_name: 指标名称
+            default_value: 默认值
+            
+        Returns:
+            float: 指标值
+        """
+        try:
+            value = results[metric_name]
+            if isinstance(value, list):
+                # 过滤nan值
+                valid_values = [v for v in value if v == v]  # 排除nan
+                if valid_values:
+                    return sum(valid_values) / len(valid_values)
+                else:
+                    logger.warning(f"指标 {metric_name} 所有值都为nan，使用默认值 {default_value}")
+                    return default_value
+            else:
+                if value == value:  # 不是nan
+                    return float(value)
+                else:
+                    logger.warning(f"指标 {metric_name} 值为nan，使用默认值 {default_value}")
+                    return default_value
+        except Exception as e:
+            logger.warning(f"提取指标 {metric_name} 失败: {e}，使用默认值 {default_value}")
+            return default_value
+    
     def prepare_dataset(self, queries: List[str], gold_answers: List[str], 
-                       top_k: int = 5, rerank: bool = True) -> Dataset:
+                       top_k: int = 5, rerank: bool = True, intent: str = "default") -> Dataset:
         """
         准备RAGAS评估数据集
         Args:
@@ -204,6 +259,7 @@ class RAGASEvaluator:
             gold_answers: 标准答案列表
             top_k: 检索数量
             rerank: 是否启用rerank
+            intent: 查询意图
         Returns:
             Dataset: RAGAS格式的数据集
         """
@@ -212,6 +268,7 @@ class RAGASEvaluator:
         logger.info(f"标准答案数量: {len(gold_answers)}")
         logger.info(f"检索数量: {top_k}")
         logger.info(f"启用rerank: {rerank}")
+        logger.info(f"查询意图: {intent}")
         
         questions = []
         contexts_list = []
@@ -225,13 +282,21 @@ class RAGASEvaluator:
             try:
                 logger.info(f"调用orchestrator.run，参数: top_k={top_k}, db_type={self.db_type}, embedding_model={self.embedding_model}, rerank={rerank}")
                 result = self.orchestrator.run(query, top_k=top_k, db_type=self.db_type, 
-                                             embedding_model=self.embedding_model, rerank=rerank)
+                                             embedding_model=self.embedding_model, rerank=rerank, intent=intent)
                 
                 logger.info(f"orchestrator.run返回结果类型: {type(result)}")
                 logger.info(f"orchestrator.run返回结果键: {list(result.keys()) if isinstance(result, dict) else '非字典类型'}")
                 
                 contexts = result.get('answers', [])
                 answer = result.get('final_answer', "未检索到有效答案")
+                
+                # 数据验证
+                is_valid, error_msg = self.validate_sample(query, contexts, answer, gold_answer)
+                if not is_valid:
+                    logger.warning(f"样本 {i+1} 数据验证失败: {error_msg}")
+                    # 使用默认值填充无效数据
+                    contexts = ["默认上下文"] if not contexts else contexts
+                    answer = "默认答案" if not answer or answer.strip() == "" else answer
                 
                 logger.info(f"提取的上下文数量: {len(contexts)}")
                 logger.info(f"提取的答案长度: {len(answer)}")
@@ -248,9 +313,10 @@ class RAGASEvaluator:
                 import traceback
                 logger.error(f"错误堆栈: {traceback.format_exc()}")
                 
+                # 使用默认值填充异常数据
                 questions.append(query)
-                contexts_list.append([])
-                answers.append("处理失败")
+                contexts_list.append(["默认上下文"])
+                answers.append("处理失败，使用默认答案")
                 ground_truths.append(gold_answer)
         
         logger.info("开始构建RAGAS数据集...")
@@ -312,25 +378,14 @@ class RAGASEvaluator:
                     continue
             
             if value is None:
-                logger.error(f"指标 {k} 的所有可能键 {keys} 都不存在！")
-                logger.error(f"可用的键: {list(results._scores_dict.keys()) if hasattr(results, '_scores_dict') else '无法获取'}")
-                raise KeyError(f"指标 {k} 的键不存在，可用键: {list(results._scores_dict.keys()) if hasattr(results, '_scores_dict') else '无法获取'}")
+                logger.warning(f"指标 {k} 的所有可能键 {keys} 都不存在，使用默认值0.0")
+                extracted_results[k] = 0.0
+                continue
             
             logger.info(f"指标 {k} 使用键 {found_key}，值: {value}")
             
-            # 处理RAGAS返回的列表格式数据
-            if isinstance(value, list):
-                # 计算平均值
-                if len(value) > 0:
-                    avg_value = sum(value) / len(value)
-                    logger.info(f"指标 {k} 列表长度: {len(value)}, 平均值: {avg_value}")
-                    extracted_results[k] = float(avg_value)
-                else:
-                    logger.warning(f"指标 {k} 返回空列表，使用默认值0.0")
-                    extracted_results[k] = 0.0
-            else:
-                # 处理单个值的情况（向后兼容）
-                extracted_results[k] = float(value) if value is not None else 0.0
+            # 使用安全提取方法处理nan值
+            extracted_results[k] = self.safe_extract_metric(results, found_key, 0.0)
         
         return extracted_results
     
@@ -860,7 +915,7 @@ class RAGASEvaluator:
 
 
 def run_ragas_evaluation(query_file: str, gold_file: str, top_k: int = 5, 
-                        output_dir: str = None, qp_type: str = 'straight', se_type: str = 'dense', ps_type='simple',agg_type: str = 'simple',db_type: str = 'opensearch',embedding_model: str = 'qwen', rerank: bool = True) -> Dict[str, Any]:
+                        output_dir: str = None, qp_type: str = 'straight', se_type: str = 'dense', ps_type='simple',agg_type: str = 'simple',db_type: str = 'opensearch',embedding_model: str = 'qwen', rerank: bool = True,intent: str = "default") -> Dict[str, Any]:
     """
     运行RAGAS评估的主函数
     
@@ -906,7 +961,7 @@ def run_ragas_evaluation(query_file: str, gold_file: str, top_k: int = 5,
     # 初始化RAGOrchestrator（工厂组装）
     query_processor = QueryProcessorFactory.create_processor(qp_type)
     search_engine = SearchEngineFactory.create(se_type)
-    aggregator = AggFactory.get_aggregator(agg_type)
+    aggregator = AggFactory.get_aggregator(name=agg_type, template=agg_type)
     postsearch = PostSearchFactory.create_processor(ps_type)
     orchestrator = RAGOrchestrator(query_processor, search_engine, postsearch,aggregator)
     
@@ -915,7 +970,7 @@ def run_ragas_evaluation(query_file: str, gold_file: str, top_k: int = 5,
     
     # 准备数据集
     logger.info("准备RAGAS数据集...")
-    dataset = evaluator.prepare_dataset(queries, gold_answers, top_k, rerank)
+    dataset = evaluator.prepare_dataset(queries, gold_answers, top_k, rerank,intent)
     
     # 执行评估
     logger.info("执行RAGAS评估...")
@@ -997,6 +1052,7 @@ if __name__ == "__main__":
         config.setdefault('db_type', 'opensearch')
         config.setdefault('embedding_model', 'qwen')
         config.setdefault('rerank', True)
+        config.setdefault('intent', 'default')
         
         logger.info("开始调用run_ragas_evaluation函数...")
         result = run_ragas_evaluation(

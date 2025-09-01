@@ -2,7 +2,6 @@ from typing import Union, List, Dict, Any
 from .processorinterface import QueryProcessorInterface
 from .straightforward import StraightforwardProcessor
 from .expander import ExpanderQueryProcessor
-from .cot import COTProcessor
 from .adaptive import AdaptiveProcessor
 
 class QueryProcessorFactory:
@@ -21,8 +20,6 @@ class QueryProcessorFactory:
             "straight": StraightforwardProcessor(),
             "origin": StraightforwardProcessor(),  # origin等同于straightforward
             "expander": ExpanderQueryProcessor(),
-            "cot": COTProcessor(),
-            "adaptive": AdaptiveProcessor()  # 新增自适应处理器
         }
         
         processor = processors.get(processor_type)
@@ -49,7 +46,7 @@ class QueryProcessorFactory:
     @staticmethod
     def get_available_processors() -> List[str]:
         """获取所有可用的处理器类型"""
-        return ["straight", "origin", "expander", "cot", "adaptive"]
+        return ["straight", "origin", "expander", "cot"]
     
     @staticmethod
     def validate_processor_type(processor_type: str) -> bool:

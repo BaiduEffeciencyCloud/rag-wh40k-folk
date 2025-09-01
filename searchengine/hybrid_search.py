@@ -5,12 +5,12 @@ import logging
 
 # 动态添加项目根目录到模块搜索路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import EMBADDING_MODEL, HYBRID_ALPHA, HYBRID_ALGORITHM, RRF_RANK_CONSTANT, RRF_WINDOW_MULTIPLIER
+from config import EMBADDING_MODEL
 from .search_interface import SearchEngineInterface
 from .dense_search import DenseSearchEngine
 from .base_search import BaseSearchEngine
 from embedding.em_factory import EmbeddingFactory
-
+from conn.osconn import OpenSearchConnection
 logger = logging.getLogger(__name__)
 
 class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
@@ -110,14 +110,27 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
         
         # 获取关键参数
         filter_dict = kwargs.get('filter', {})
-        alpha = kwargs.get('alpha', HYBRID_ALPHA)
+        #alpha = kwargs.get('alpha', HYBRID_ALPHA)
         # db_conn 和 embedding_model 都是方法参数，不要从kwargs重新获取！
         # db_conn = kwargs.get('db_conn')  # 这行也会导致None覆盖！
         # embedding_model = kwargs.get('embedding_model')  # 这行导致了None覆盖！
-        rerank = kwargs.get('rerank', True)  # 添加rerank参数支持
+        # rerank = kwargs.get('rerank', True)  # 添加rerank参数支持
         query_intent = intent
         # 根据配置选择算法
-        algorithm = kwargs.get('algorithm', HYBRID_ALGORITHM)
+        # 优先使用传入的algorithm参数，如果没有则根据intent动态加载配置
+        algorithm = kwargs.get('algorithm')
+        if not algorithm:
+            # 动态加载intent配置
+            try:
+
+                # 创建一个临时连接实例来加载配置
+                temp_conn = OpenSearchConnection()
+                intent_config = temp_conn._load_intent_config(query_intent)
+                algorithm = intent_config.HYBRID_CONF.HYBRID_ALGORITHM
+                logger.info(f"根据intent '{query_intent}' 动态加载算法配置: {algorithm}")
+            except Exception as e:
+                logger.warning(f"动态加载intent配置失败，使用默认算法: {str(e)}")
+                algorithm = "pipeline"
         
         try:
             if algorithm == 'rrf':

@@ -6,17 +6,17 @@ import json
 import re
 import time
 from datetime import datetime
+from types import SimpleNamespace
 from opensearchpy import OpenSearch
 from http import HTTPStatus
 from .coninterface import ConnectionInterface
-from config import OPENSEARCH_URI, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD, OPENSEARCH_INDEX, QWEN_DIMENSION, ALIYUN_RERANK_MODEL, RERANK_TOPK, HYBRID_ALGORITHM, RRF_SPARSE_TERMS_BOOST, RRF_DEFAULT_RANK_CONSTANT, RRF_SPARSE_WEIGHT, RRF_DENSE_WEIGHT, RRF_WINDOW_MULTIPLIER, RRF_MAX_WINDOW_SIZE
+from config import OPENSEARCH_URI, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD, OPENSEARCH_INDEX, QWEN_DIMENSION, ALIYUN_RERANK_MODEL, RERANK_TOPK
 from opensearchpy import OpenSearch
 from typing import List, Dict
 import dashscope
 from http import HTTPStatus
-from config import PIPELINE_BM25_BOOST, PIPELINE_VECTOR_BOOST, HYBRID_ALPHA
-from config import QUERY_LENGTH_THRESHOLDS, BOOST_WEIGHTS, MATCH_PHRASE_CONFIG, HEADING_WEIGHTS, ENABLE_PIPELINE_CACHE
-from config import SEARCH_FIELD_WEIGHTS, DEBUG_ANALYZE, SEARCH_ANALYSIS_LOG_FILE, SEARCH_ANALYSIS_LOG_MAX_SIZE, OPENSEARCH_SEARCH_ANALYZER
+from config import MATCH_PHRASE_CONFIG 
+from config import DEBUG_ANALYZE, OPENSEARCH_SEARCH_ANALYZER
 import json
 # Opensearch数据库的处理类,负责数据转化,数据上传,数据搜索
 class OpenSearchConnection(ConnectionInterface):
@@ -50,7 +50,7 @@ class OpenSearchConnection(ConnectionInterface):
         self.uri = uri or OPENSEARCH_URI
         self.username = username or OPENSEARCH_USERNAME
         self.password = password or OPENSEARCH_PASSWORD
-        
+        self.search_params=None
         # 记录初始化信息
         self.logger.info(f"OpenSearch connection initialized - Index: {self.index}, URI: {self.uri}")
         
@@ -203,6 +203,51 @@ class OpenSearchConnection(ConnectionInterface):
             self.logger.error(error_msg)
             raise Exception(error_msg)
         
+    def _load_intent_config(self, intent: str) -> SimpleNamespace:
+        """根据intent加载对应的参数配置文件
+        
+        Args:
+            intent: 检索意图名称 (default/rule/query/list/compare)
+        
+        Returns:
+            SimpleNamespace: 配置参数对象，结构与JSON文件一致
+        """
+        try:
+            # 构造配置文件路径
+            config_file = os.path.join(os.path.dirname(__file__), 'params', f'{intent}.json')
+            
+            # 检查文件是否存在
+            if not os.path.exists(config_file):
+                raise FileNotFoundError(f"Intent配置文件不存在: {config_file}")
+            
+            # 读取并解析JSON文件
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+            
+            # 递归转换dict为SimpleNamespace，但保留需要调用.items()的字典为字典格式
+            def dict_to_namespace(d, key_name=None):
+                preserve_dict_keys = {'HEADING_WEIGHTS', 'SEARCH_FIELD_WEIGHTS', 'BOOST_WEIGHTS', 'QUERY_LENGTH_THRESHOLDS'}
+                
+                if isinstance(d, dict):
+                    # 如果当前字典的key_name在preserve_dict_keys中，保持为字典
+                    if key_name in preserve_dict_keys:
+                        return d
+                    else:
+                        return SimpleNamespace(**{k: dict_to_namespace(v, k) for k, v in d.items()})
+                elif isinstance(d, list):
+                    return [dict_to_namespace(item) for item in d]
+                else:
+                    return d
+            
+            config_obj = dict_to_namespace(config_data)
+            
+            self.logger.info(f"成功加载intent配置: {intent}")
+            return config_obj
+            
+        except Exception as e:
+            self.logger.error(f"加载intent配置失败: {intent}, 错误: {str(e)}")
+            raise
+
     def hybrid_search(self, query: str, intent: str, filter: dict = None, top_k: int = 20, rerank: bool = False, **kwargs) -> dict:
         """
         执行混合搜索的统一接口
@@ -222,16 +267,17 @@ class OpenSearchConnection(ConnectionInterface):
             dict: 原始的 OpenSearch hits 字典，如果启用rerank则返回rerank后的结果
         """
         try:
-            logging.info(f"Hybrid搜索开始，查询: {query}，意图: {intent}")
-            # 优先使用传入的算法参数，如果没有则使用配置默认值
-            algorithm = kwargs.get('algorithm', HYBRID_ALGORITHM)
-            
+
+            # 优先使用传入的算法参数，如果没有则使用动态配置json里得到的值
+            self.search_params = self._load_intent_config(intent)
+            algorithm = kwargs.get('algorithm', self.search_params.HYBRID_CONF.HYBRID_ALGORITHM)
+            logging.info(f"Hybrid搜索开始，查询: {query}，意图: {intent},算法:{algorithm}")
             if algorithm == 'pipeline':
                 # 从 kwargs 中提取 pipeline 所需参数
                 query_vector = kwargs.get('query_vector')
                 # 从配置文件读取默认权重，避免硬编码
-                bm25_weight = kwargs.get('bm25_weight', 1.0 - HYBRID_ALPHA)
-                vector_weight = kwargs.get('vector_weight', HYBRID_ALPHA)
+                bm25_weight = kwargs.get('bm25_weight', 1.0 - self.search_params.HYBRID_CONF.HYBRID_ALPHA)
+                vector_weight = kwargs.get('vector_weight', self.search_params.HYBRID_CONF.HYBRID_ALPHA)
                 
                 if not query_vector:
                     raise ValueError("pipeline方式需要query_vector参数")
@@ -271,7 +317,7 @@ class OpenSearchConnection(ConnectionInterface):
                     # 将OpenSearch响应转换为rerank期望的格式
                     candidates = self._convert_response_to_rerank_candidates(response)
                     if candidates:
-                        rerank_results = self.rerank(query, candidates, RERANK_TOPK,ALIYUN_RERANK_MODEL)
+                        rerank_results = self.rerank(query, candidates, self.search_params.RERANK.RERANK_TOPK, self.search_params.RERANK.ALIYUN_RERANK_MODEL)
                         # 将rerank结果转换回OpenSearch格式
                         return self._convert_rerank_results_to_opensearch_format(rerank_results, response)
                     else:
@@ -429,8 +475,8 @@ class OpenSearchConnection(ConnectionInterface):
             if query_vector is None:
                 raise ValueError("hybrid_search 需要 query_vector 参数")
             
-            if not query_vector or len(query_vector) != 2048:
-                raise ValueError(f"查询向量维度不正确: {len(query_vector) if query_vector else 0}")
+            if not query_vector or len(query_vector) != QWEN_DIMENSION:
+                raise ValueError(f"查询向量维度不正确: {len(query_vector) if query_vector else 0}, 期望: {QWEN_DIMENSION}")
             
             self.logger.info(f"Hybrid搜索开始，查询: {query}，向量维度: {len(query_vector)}，OpenSearch版本: {self.version}")
             
@@ -1297,8 +1343,8 @@ class OpenSearchConnection(ConnectionInterface):
         """
         # 设置合理的默认RRF参数
         default_rrf_params = {
-            "window_size": min(top_k * RRF_WINDOW_MULTIPLIER, RRF_MAX_WINDOW_SIZE),  # 使用配置的窗口倍数，但不超过最大值
-            "rank_constant": RRF_DEFAULT_RANK_CONSTANT,  # 标准RRF常数
+            "window_size": min(top_k * self.search_params.RRF_CONF.RRF_WINDOW_MULTIPLIER, self.search_params.RRF_CONF.RRF_MAX_WINDOW_SIZE),  # 使用配置的窗口倍数，但不超过最大值
+            "rank_constant": self.search_params.RRF_CONF.RRF_DEFAULT_RANK_CONSTANT,  # 标准RRF常数
             "combination_technique": "rrf"  # 使用RRF组合技术
         }
         
@@ -1324,8 +1370,8 @@ class OpenSearchConnection(ConnectionInterface):
             window_size = rrf_params['window_size']
             if not isinstance(window_size, int) or window_size <= 0:
                 raise ValueError("window_size必须是正整数")
-            if window_size > RRF_MAX_WINDOW_SIZE:
-                raise ValueError(f"window_size不能超过{RRF_MAX_WINDOW_SIZE}，过大的窗口可能影响性能")
+            if window_size > self.search_params.RRF_CONF.RRF_MAX_WINDOW_SIZE:
+                raise ValueError(f"window_size不能超过{self.search_params.RRF_CONF.RRF_MAX_WINDOW_SIZE}，过大的窗口可能影响性能")
         
         if 'rank_constant' in rrf_params:
             rank_constant = rrf_params['rank_constant']
@@ -1356,9 +1402,9 @@ class OpenSearchConnection(ConnectionInterface):
         
         # 应用配置的权重
         if 'terms' in sparse_query:
-            sparse_query['terms']['boost'] = RRF_SPARSE_WEIGHT
+            sparse_query['terms']['boost'] = self.search_params.RRF_CONF.RRF_SPARSE_WEIGHT
         if 'knn' in dense_query:
-            dense_query['knn']['embedding']['boost'] = RRF_DENSE_WEIGHT
+            dense_query['knn']['embedding']['boost'] = self.search_params.RRF_CONF.RRF_DENSE_WEIGHT
         
         # 构建混合查询
         search_body = {
@@ -1469,7 +1515,7 @@ class OpenSearchConnection(ConnectionInterface):
         return {
             "terms": {
                 "text": cleaned_terms,
-                "boost": RRF_SPARSE_TERMS_BOOST  # 使用配置的boost值，提高稀疏向量查询权重
+                "boost": self.search_params.RRF_CONF.RRF_SPARSE_TERMS_BOOST  # 使用配置的boost值，提高稀疏向量查询权重
             }
         }
 
@@ -1628,11 +1674,11 @@ class OpenSearchConnection(ConnectionInterface):
         """
         # 生成固定的Pipeline ID（基于参数）
         if rrf_params:
-            rank_constant = rrf_params.get('rank_constant', RRF_DEFAULT_RANK_CONSTANT)
-            window_size = rrf_params.get('window_size', RRF_MAX_WINDOW_SIZE)
+            rank_constant = rrf_params.get('rank_constant', self.search_params.RRF_CONF.RRF_DEFAULT_RANK_CONSTANT)
+            window_size = rrf_params.get('window_size', self.search_params.RRF_CONF.RRF_MAX_WINDOW_SIZE)
         else:
-            rank_constant = RRF_DEFAULT_RANK_CONSTANT
-            window_size = RRF_MAX_WINDOW_SIZE
+            rank_constant = self.search_params.RRF_CONF.RRF_DEFAULT_RANK_CONSTANT
+            window_size = self.search_params.RRF_CONF.RRF_MAX_WINDOW_SIZE
         
         # 使用固定算法生成Pipeline ID
         pipeline_id = f"rrf_pipeline_rc{rank_constant}_ws{window_size}"
@@ -1659,7 +1705,7 @@ class OpenSearchConnection(ConnectionInterface):
         # 设置默认参数
         default_params = {
             "window_size": 20,
-            "rank_constant": RRF_DEFAULT_RANK_CONSTANT
+            "rank_constant": self.search_params.RRF_CONF.RRF_DEFAULT_RANK_CONSTANT
         }
         
         if rrf_params:
@@ -1808,7 +1854,7 @@ class OpenSearchConnection(ConnectionInterface):
         return {
             "terms": {
                 "text": cleaned_terms,
-                "boost": RRF_SPARSE_TERMS_BOOST  # 使用配置的boost值，提高稀疏向量查询权重
+                "boost": self.search_params.RRF_CONF.RRF_SPARSE_TERMS_BOOST  # 使用配置的boost值，提高稀疏向量查询权重
             }
         }
 
@@ -1891,7 +1937,7 @@ class OpenSearchConnection(ConnectionInterface):
         # 使用配置权重，动态构建字段列表
         fields = [
             f"{field}^{weight}" 
-            for field, weight in HEADING_WEIGHTS.items()
+            for field, weight in self.search_params.QUERY_WEIGHT.HEADING_WEIGHTS.items()
         ]
         
         return {
@@ -1899,7 +1945,7 @@ class OpenSearchConnection(ConnectionInterface):
                 "query": query,
                 "fields": fields,
                 "type": "best_fields",
-                "analyzer": OPENSEARCH_SEARCH_ANALYZER,  # 使用配置的analyzer
+                "analyzer": self.search_params.HYBRID_CONF.OPENSEARCH_SEARCH_ANALYZER,  # 使用配置的analyzer
                 "tie_breaker": 0.3
             }
         }
@@ -1911,20 +1957,20 @@ class OpenSearchConnection(ConnectionInterface):
         query_length = len(query.split())
         
         # 获取阈值配置（带默认值）
-        short_threshold = QUERY_LENGTH_THRESHOLDS.get('short')
-        long_threshold = QUERY_LENGTH_THRESHOLDS.get('medium')
+        short_threshold = self.search_params.QUERY_WEIGHT.QUERY_LENGTH_THRESHOLDS["short"]
+        long_threshold = self.search_params.QUERY_WEIGHT.QUERY_LENGTH_THRESHOLDS["medium"]
         
         # 长查询/详细描述 - 提高正文权重
         if query_length > long_threshold:
-            return BOOST_WEIGHTS.get('long_query')
+            return self.search_params.QUERY_WEIGHT.BOOST_WEIGHTS["long_query"]
         
         # 中等长度查询
         elif query_length > short_threshold:
-            return BOOST_WEIGHTS.get('medium_query')
+            return self.search_params.QUERY_WEIGHT.BOOST_WEIGHTS["medium_query"]
         
         # 短查询/关键词 - 降低正文权重，侧重标题
         else:
-            return BOOST_WEIGHTS.get('short_query')
+            return self.search_params.QUERY_WEIGHT.BOOST_WEIGHTS["short_query"]
     
     def _build_content_query(self, query: str) -> dict:
         """构建正文字段查询"""
@@ -1932,7 +1978,7 @@ class OpenSearchConnection(ConnectionInterface):
             "match": {
                 "text": {
                     "query": query,
-                    "analyzer": OPENSEARCH_SEARCH_ANALYZER,  # 使用配置的analyzer
+                    "analyzer": self.search_params.HYBRID_CONF.OPENSEARCH_SEARCH_ANALYZER,  # 使用配置的analyzer
                     "boost": self._calculate_content_boost(query),
                     "operator": "or"
                 }
@@ -1942,14 +1988,14 @@ class OpenSearchConnection(ConnectionInterface):
     def _build_metadata_query(self, query: str) -> dict:
         """构建元数据字段查询"""
         # 使用配置化的字段权重，构建fields列表
-        fields = [f"{field}^{weight}" for field, weight in SEARCH_FIELD_WEIGHTS.items()]
+        fields = [f"{field}^{weight}" for field, weight in self.search_params.QUERY_WEIGHT.SEARCH_FIELD_WEIGHTS.items()]
         
         return {
             "multi_match": {
                 "query": query,
                 "fields": fields,
                 "type": "best_fields",
-                "analyzer": OPENSEARCH_SEARCH_ANALYZER  # 使用配置的analyzer
+                "analyzer": self.search_params.HYBRID_CONF.OPENSEARCH_SEARCH_ANALYZER  # 使用配置的analyzer
             }
         }
     
@@ -1995,7 +2041,7 @@ class OpenSearchConnection(ConnectionInterface):
                 "embedding": {
                     "vector": query_vector,
                     "k": min(100, top_k * 3),  # 扩大召回池
-                    "boost": PIPELINE_VECTOR_BOOST  # 使用配置文件中的常量
+                    "boost": self.search_params.HYBRID_CONF.PIPELINE_VECTOR_BOOST  # 使用配置文件中的常量
                 }
             }
         }
@@ -2005,8 +2051,8 @@ class OpenSearchConnection(ConnectionInterface):
             "match": {
                 "text": {
                     "query": query,
-                    "analyzer": OPENSEARCH_SEARCH_ANALYZER,  # 使用配置的analyzer
-                    "boost": PIPELINE_BM25_BOOST  # 使用配置文件中的常量
+                    "analyzer": self.search_params.HYBRID_CONF.OPENSEARCH_SEARCH_ANALYZER,  # 使用配置的analyzer
+                    "boost": self.search_params.HYBRID_CONF.PIPELINE_BM25_BOOST  # 使用配置文件中的常量
                 }
             }
         }
@@ -2041,10 +2087,10 @@ class OpenSearchConnection(ConnectionInterface):
             debug_query = {
                 "hybrid": {
                     "queries": [
-                        {"type": "heading_query", "fields": list(HEADING_WEIGHTS.keys())},
+                        {"type": "heading_query", "fields": list(self.search_params.QUERY_WEIGHT.HEADING_WEIGHTS.keys())},
                         {"type": "bm25_query", "field": "text"},
                         {"type": "content_query", "field": "text"},
-                        {"type": "metadata_query", "fields": list(SEARCH_FIELD_WEIGHTS.keys())},
+                        {"type": "metadata_query", "fields": list(self.search_params.QUERY_WEIGHT.SEARCH_FIELD_WEIGHTS.keys())},
                         {"type": "knn_query", "field": "embedding", "k": min(100, top_k * 3)}
                     ]
                 }

@@ -56,7 +56,7 @@ def main():
     print(f"embedding模型: {args.embedding_model}")
     print(f"topk: {args.topk}")
 
-    intent="default"
+    intent = args.intent
 
     qp_type = args.qp
     query_processor = QueryProcessorFactory.create_processor(qp_type)

@@ -213,16 +213,7 @@ class SparseSearchEngine(BaseSearchEngine, SearchEngineInterface):
         """返回搜索引擎类型"""
         return "sparse"
     
-    def get_capabilities(self) -> Dict[str, Any]:
-        """获取搜索引擎能力信息"""
-        return {
-            "type": "sparse",
-            "description": "基于BM25的稀疏检索",
-            "supports_filtering": True,
-            "supports_hybrid": False,
-            "algorithm": "BM25",
-            "index_name": self.index_name
-        }
+
     
     def get_sparse_vector_info(self, query_text: str) -> Dict[str, Any]:
         """

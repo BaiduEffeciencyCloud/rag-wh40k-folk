@@ -133,16 +133,7 @@ class DenseSearchEngine(BaseSearchEngine, SearchEngineInterface):
     def get_type(self) -> str:
         return "dense"
     
-    def get_capabilities(self) -> Dict[str, Any]:
-        """获取搜索引擎能力信息"""
-        return {
-            "type": "dense",
-            "description": "基于向量相似度的密集检索",
-            "supports_filtering": True,
-            "supports_hybrid": False,
-            "embedding_model": EMBADDING_MODEL,
-            "index_name": "dynamic"  # 动态数据库连接，不固定索引名
-        }
+
     
     # 删除重复的_log_score_analysis方法，使用基类的方法 
 

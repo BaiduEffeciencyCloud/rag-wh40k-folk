@@ -10,13 +10,13 @@ import json
 import os
 import yaml
 from typing import Dict, List, Any, Union
-from .processorinterface import QueryProcessorInterface
-from .data_models import IntentResult, COTStep, PipelineConfig
+from ..qProcessor.data_models import IntentResult, COTStep
 from intent_training.model.intent_classifier import IntentClassifier
 from intent_training.model.uncertainty_detector import UncertaintyDetector
-from intent_training.feature.feature_engineering import IntentFeatureExtractor
 from intent_training.predictor import IntentPredictor
 from vocab_mgr.vocab_loader import VocabLoad
+from intent_training.feature.pa_feature import EnhancedFeatureExtractor
+
 from engineconfig.qp_config import (
     INTENT_CLASSIFIER_CONFIG,
     UNCERTAINTY_CONFIG,
@@ -26,7 +26,7 @@ from engineconfig.qp_config import (
 
 logger = logging.getLogger(__name__)
 
-class AdaptiveProcessor(QueryProcessorInterface):
+class IntentAnalyzer:
     """自适应查询处理器"""
     
     def __init__(self, intent_classifier_path: str = None, uncertainty_config: Dict = None):
@@ -46,8 +46,6 @@ class AdaptiveProcessor(QueryProcessorInterface):
             self.feature_extractor = self._load_feature_extractor()
 
         self.uncertainty_detector = UncertaintyDetector(uncertainty_config or UNCERTAINTY_CONFIG)
-        self.cot_processor = AdaptiveCOTProcessor()
-        self.pipeline_generator = AdaptiveRetrievalPipeline()
         self.vocab_loader = VocabLoad()  # 初始化VocabLoad实例
     
     def process(self, query: str) -> Dict[str, Any]:
@@ -71,32 +69,12 @@ class AdaptiveProcessor(QueryProcessorInterface):
                 'processed_queries': [],
                 'pipeline_config': None,
                 'intent_result': intent_result,
-                'cot_steps': [],
                 'fixed_response': self._get_wh40k_response()
             }
         
-        # 3. COT处理
-        cot_steps = self._process_cot(query, intent_result)
-        
-        # 4. 管道生成
-        pipeline_config = self._generate_pipeline(query, intent_result, cot_steps)
-        
-        # 5. 生成处理后的查询
-        processed_queries = []
-        for step in cot_steps:
-            processed_queries.append({
-                'query': step.query,
-                'step_id': step.step_id,
-                'step_type': step.step_type,
-                'reasoning': step.reasoning
-            })
-        
         return {
-            'processed_queries': processed_queries,
-            'pipeline_config': pipeline_config,
             'intent_result': intent_result,
             'uncertainty_result': intent_result.uncertainty_result,
-            'cot_steps': cot_steps
         }
     
     def get_type(self) -> str:
@@ -136,9 +114,6 @@ class AdaptiveProcessor(QueryProcessorInterface):
         if feature_type == 'pa':
             # 使用Position-Aware特征提取器
             try:
-                # 导入PA特征提取器
-                from intent_training.feature.factory import FeatureExtractorFactory
-                from intent_training.feature.pa_feature import EnhancedFeatureExtractor
 
                 # 创建PA特征提取器
                 pa_extractor = EnhancedFeatureExtractor(config)
@@ -486,10 +461,7 @@ class AdaptiveProcessor(QueryProcessorInterface):
         """随机选择战锤40K阵营的回复"""
         responses = NON_WH40K_RESPONSES.values()
         return random.choice(list(responses))
-    
-    def _process_cot(self, query: str, intent: IntentResult) -> List[COTStep]:
-        """根据意图进行COT处理"""
-        return self.cot_processor.process_cot(query, intent)
+
     
     def _generate_pipeline(self, query: str, intent: IntentResult, cot_steps: List[COTStep]) -> Dict[str, Any]:
         """生成检索管道配置"""

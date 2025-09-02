@@ -159,37 +159,6 @@ PIPELINE_VECTOR_BOOST = 1.0  # 向量搜索boost值，影响向量搜索结果�
 
 # ========== Match Phrase查询配置 ==========
 # Match Phrase查询算法参数配置
-MATCH_PHRASE_CONFIG = {
-    'enabled': True,                    # 是否启用match_phrase查询
-    'default_boost': 1.5,              # 默认boost值
-    'fuzziness': 'AUTO',               # 模糊匹配级别
-    'operator': 'or',                  # 操作符
-    'max_expansions': 50,              # 最大扩展数
-    'prefix_length': 0,                # 前缀长度
-    'min_score': 0.1,                  # 最小分数阈值
-    
-    # 策略选择阈值
-    'query_text_min_length': 2,        # 查询文本最小长度
-    'sparse_vector_min_terms': 3,      # 稀疏向量最小术语数
-    
-    # 混合查询权重
-    'match_phrase_weight': 2.0,        # match_phrase权重
-    'terms_weight': 1.0,               # terms权重
-    
-    # 模糊匹配过滤配置（DeepSeek建议）
-    'fuzzy_filters': [
-        {"min_term_freq": 0.01},       # 保护低频专有名词（如"艾达灵族"）
-        {"max_doc_freq": 0.5}          # 忽略高频通用词（如"单位"、"技能"）
-    ],
-    
-    # 词频过滤阈值
-    'term_frequency_thresholds': {
-        'min_term_freq': 0.01,         # 最小词频，保护专有名词
-        'max_doc_freq': 0.5,           # 最大文档频率，过滤高频词
-        'min_word_length': 2,          # 最小词长度
-        'max_word_length': 20          # 最大词长度
-    }
-}
 
 
 # ========== 混合搜索优化配置 ==========

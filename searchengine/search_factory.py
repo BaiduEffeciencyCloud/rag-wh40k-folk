@@ -39,21 +39,4 @@ class SearchEngineFactory:
             'sparse': 'Sparse稀疏搜索引擎'
         }
     
-    @classmethod
-    def get_engine_info(cls, engine_type: str) -> Optional[Dict[str, Any]]:
-        """
-        获取指定类型搜索引擎的详细信息
-        Args:
-            engine_type: 搜索引擎类型
-        Returns:
-            引擎信息字典
-        """
-        if engine_type not in cls.SUPPORTED_TYPES:
-            return None
-        
-        # 创建临时实例获取能力信息
-        try:
-            engine = cls.create(engine_type)
-            return engine.get_capabilities()
-        except Exception:
-            return None 
+ 

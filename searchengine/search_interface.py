@@ -27,9 +27,6 @@ class SearchEngineInterface(ABC):
         """获取搜索引擎类型"""
         pass
     
-    @abstractmethod
-    def get_capabilities(self) -> Dict[str, Any]:
-        """获取搜索引擎能力信息"""
-        pass
+
 
     

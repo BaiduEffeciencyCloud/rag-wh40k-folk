@@ -15,7 +15,6 @@ from opensearchpy import OpenSearch
 from typing import List, Dict
 import dashscope
 from http import HTTPStatus
-from config import MATCH_PHRASE_CONFIG 
 from config import DEBUG_ANALYZE, OPENSEARCH_SEARCH_ANALYZER
 import json
 # Opensearch数据库的处理类,负责数据转化,数据上传,数据搜索
@@ -226,7 +225,7 @@ class OpenSearchConnection(ConnectionInterface):
             
             # 递归转换dict为SimpleNamespace，但保留需要调用.items()的字典为字典格式
             def dict_to_namespace(d, key_name=None):
-                preserve_dict_keys = {'HEADING_WEIGHTS', 'SEARCH_FIELD_WEIGHTS', 'BOOST_WEIGHTS', 'QUERY_LENGTH_THRESHOLDS'}
+                preserve_dict_keys = {'HEADING_WEIGHTS', 'SEARCH_FIELD_WEIGHTS', 'BOOST_WEIGHTS', 'QUERY_LENGTH_THRESHOLDS', 'MATCH_PHRASE_CONFIG'}
                 
                 if isinstance(d, dict):
                     # 如果当前字典的key_name在preserve_dict_keys中，保持为字典
@@ -295,10 +294,12 @@ class OpenSearchConnection(ConnectionInterface):
                 # 从 kwargs 中提取 RRF 所需参数
                 sparse_vector = kwargs.get('sparse_vector')
                 dense_vector = kwargs.get('dense_vector')
-                rrf_params = kwargs.get('rrf_params')
                 
                 if not sparse_vector or not dense_vector:
                     raise ValueError("RRF方式需要sparse_vector和dense_vector参数")
+                
+                # 使用内部方法计算RRF参数，不需要外部传递
+                rrf_params = self._calculate_rrf_params(top_k)
                     
                 response = self.hybrid_search_rrf(
                     query=query,
@@ -337,6 +338,53 @@ class OpenSearchConnection(ConnectionInterface):
         except Exception as e:
             self.logger.error(f"Hybrid搜索失败: {str(e)}")
             raise
+
+    def _calculate_rrf_params(self, top_k: int) -> dict:
+        """
+        计算RRF算法参数
+        
+        RRF (Reciprocal Rank Fusion) 算法参数说明：
+        
+        Args:
+            top_k: 搜索返回的文档数量
+            
+        Returns:
+            dict: 包含RRF算法参数的字典
+            
+        RRF参数业务意义：
+        
+        1. window_size (窗口大小):
+           - 定义：RRF算法在计算融合分数时考虑的候选文档数量
+           - 作用：控制参与排名融合的文档范围
+           - 优化方向：越大越好，建议 top_k * 4
+           - 原因：更大的窗口能捕获更多潜在的优质文档，给RRF算法更多选择空间
+           
+        2. rank_constant (排名常数):
+           - 定义：RRF公式中的平滑常数，防止分母为0
+           - 作用：控制排名融合的敏感度和稳定性
+           - 优化方向：越小越好，建议 10 或 5
+           - 原因：更小的常数让排名差异更明显，提高算法的区分度
+           
+        RRF公式：score = 1 / (rank_constant + rank)
+        
+        注意事项：
+        - window_size过大可能增加计算开销，但通常值得
+        - rank_constant过小可能导致排名差异过于敏感，建议不要小于5
+        - 需要在效果提升和计算效率之间找到平衡点
+        """
+        # 从动态配置获取RRF参数
+        if self.search_params and hasattr(self.search_params, 'RRF_CONF'):
+            window_multiplier = self.search_params.RRF_CONF.RRF_WINDOW_MULTIPLIER
+            rank_constant = self.search_params.RRF_CONF.RRF_DEFAULT_RANK_CONSTANT
+        else:
+            # 兜底：使用默认值
+            window_multiplier = 3
+            rank_constant = 20
+        
+        return {
+            "window_size": top_k * window_multiplier,
+            "rank_constant": rank_constant
+        }
 
     def _convert_response_to_list(self, response: dict) -> list:
         """
@@ -1799,23 +1847,31 @@ class OpenSearchConnection(ConnectionInterface):
         # 预处理查询文本
         processed_query = self._preprocess_query_text(query_text)
         
+        # 获取动态配置，如果没有则使用默认配置
+        if self.search_params and hasattr(self.search_params, 'QUERY_WEIGHT') and hasattr(self.search_params.QUERY_WEIGHT, 'MATCH_PHRASE_CONFIG'):
+            match_config = self.search_params.QUERY_WEIGHT.MATCH_PHRASE_CONFIG
+        else:
+            # 兜底：使用config.py中的配置
+            from config import MATCH_PHRASE_CONFIG
+            match_config = MATCH_PHRASE_CONFIG
+        
         # 构建基础查询
         query_body = {
             "match": {
                 "text": {
                     "query": processed_query,
-                    "boost": MATCH_PHRASE_CONFIG['default_boost'],
-                    "operator": MATCH_PHRASE_CONFIG['operator'],
-                    "fuzziness": MATCH_PHRASE_CONFIG['fuzziness'],
-                    "max_expansions": MATCH_PHRASE_CONFIG['max_expansions'],
-                    "prefix_length": MATCH_PHRASE_CONFIG['prefix_length']
+                    "boost": match_config['default_boost'],
+                    "operator": match_config['operator'],
+                    "fuzziness": match_config['fuzziness'],
+                    "max_expansions": match_config['max_expansions'],
+                    "prefix_length": match_config['prefix_length']
                 }
             }
         }
         
         # 添加模糊匹配过滤配置（DeepSeek建议）
-        if MATCH_PHRASE_CONFIG.get('fuzzy_filters'):
-            query_body["match"]["text"]["fuzzy_options"] = MATCH_PHRASE_CONFIG['fuzzy_filters']
+        if match_config.get('fuzzy_filters'):
+            query_body["match"]["text"]["fuzzy_options"] = match_config['fuzzy_filters']
         
         return query_body
 
@@ -1863,7 +1919,15 @@ class OpenSearchConnection(ConnectionInterface):
     def _apply_fuzzy_filters(self, query_text: str) -> str:
         """应用模糊匹配过滤，保护专有名词，过滤高频词"""
         
-        if not MATCH_PHRASE_CONFIG.get('fuzzy_filters'):
+        # 获取动态配置，如果没有则使用默认配置
+        if self.search_params and hasattr(self.search_params, 'QUERY_WEIGHT') and hasattr(self.search_params.QUERY_WEIGHT, 'MATCH_PHRASE_CONFIG'):
+            match_config = self.search_params.QUERY_WEIGHT.MATCH_PHRASE_CONFIG
+        else:
+            # 兜底：使用config.py中的配置
+            from config import MATCH_PHRASE_CONFIG
+            match_config = MATCH_PHRASE_CONFIG
+        
+        if not match_config.get('fuzzy_filters'):
             return query_text
         
         # 分词处理
@@ -1872,9 +1936,9 @@ class OpenSearchConnection(ConnectionInterface):
         
         for word in words:
             # 检查词长度
-            if len(word) < MATCH_PHRASE_CONFIG['term_frequency_thresholds']['min_word_length']:
+            if len(word) < match_config['term_frequency_thresholds']['min_word_length']:
                 continue
-            if len(word) > MATCH_PHRASE_CONFIG['term_frequency_thresholds']['max_word_length']:
+            if len(word) > match_config['term_frequency_thresholds']['max_word_length']:
                 continue
             
             # 这里可以添加更复杂的词频检查逻辑
@@ -2221,7 +2285,11 @@ class OpenSearchConnection(ConnectionInterface):
     def _get_search_analysis_logger(self):
         """获取搜索分析日志记录器"""
         if self._search_analysis_logger is None:
-            self._search_analysis_logger = SearchAnalysisLogger()
+            # 创建日志记录器并传递search_params
+            logger = SearchAnalysisLogger()
+            # 设置search_params属性，让日志记录器能够访问动态配置
+            logger.search_params = self.search_params
+            self._search_analysis_logger = logger
         return self._search_analysis_logger
 
 
@@ -2229,8 +2297,31 @@ class SearchAnalysisLogger:
     """搜索分析日志记录器"""
     
     def __init__(self, log_file=None, max_size=None):
-        self.log_file = log_file or SEARCH_ANALYSIS_LOG_FILE
-        self.max_size = max_size or SEARCH_ANALYSIS_LOG_MAX_SIZE
+        # 使用动态配置或默认值
+        if log_file is None:
+            try:
+                # 尝试从动态配置获取
+                if hasattr(self, 'search_params') and hasattr(self.search_params, 'LOG_CONF'):
+                    log_file = self.search_params.LOG_CONF.SEARCH_ANALYSIS_LOG_FILE
+                else:
+                    # 兜底：使用硬编码默认值
+                    log_file = "logs/search_analysis.log"
+            except:
+                log_file = "logs/search_analysis.log"
+        
+        if max_size is None:
+            try:
+                # 尝试从动态配置获取
+                if hasattr(self, 'search_params') and hasattr(self.search_params, 'LOG_CONF'):
+                    max_size = self.search_params.LOG_CONF.SEARCH_ANALYSIS_LOG_MAX_SIZE
+                else:
+                    # 兜底：使用硬编码默认值
+                    max_size = 5 * 1024 * 1024  # 5MB
+            except:
+                max_size = 5 * 1024 * 1024  # 5MB
+        
+        self.log_file = log_file
+        self.max_size = max_size
         self._setup_logger()
     
     def _setup_logger(self):

@@ -2,7 +2,6 @@ from typing import Union, List, Dict, Any
 from .processorinterface import QueryProcessorInterface
 from .straightforward import StraightforwardProcessor
 from .expander import ExpanderQueryProcessor
-from .adaptive import AdaptiveProcessor
 
 class QueryProcessorFactory:
     """查询处理器工厂类"""

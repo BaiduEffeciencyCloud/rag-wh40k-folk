@@ -5,7 +5,6 @@ import logging
 
 # 动态添加项目根目录到模块搜索路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import EMBADDING_MODEL
 from .search_interface import SearchEngineInterface
 from .dense_search import DenseSearchEngine
 from .base_search import BaseSearchEngine
@@ -116,21 +115,18 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
         # embedding_model = kwargs.get('embedding_model')  # 这行导致了None覆盖！
         # rerank = kwargs.get('rerank', True)  # 添加rerank参数支持
         query_intent = intent
-        # 根据配置选择算法
-        # 优先使用传入的algorithm参数，如果没有则根据intent动态加载配置
-        algorithm = kwargs.get('algorithm')
-        if not algorithm:
-            # 动态加载intent配置
-            try:
-
-                # 创建一个临时连接实例来加载配置
-                temp_conn = OpenSearchConnection()
-                intent_config = temp_conn._load_intent_config(query_intent)
-                algorithm = intent_config.HYBRID_CONF.HYBRID_ALGORITHM
-                logger.info(f"根据intent '{query_intent}' 动态加载算法配置: {algorithm}")
-            except Exception as e:
-                logger.warning(f"动态加载intent配置失败，使用默认算法: {str(e)}")
-                algorithm = "pipeline"
+        # 动态加载intent配置
+        try:
+            # 创建一个临时连接实例来加载配置
+            temp_conn = OpenSearchConnection()
+            intent_config = temp_conn._load_intent_config(query_intent)
+            alpha = intent_config.HYBRID_CONF.HYBRID_ALPHA
+            algorithm = intent_config.HYBRID_CONF.HYBRID_ALGORITHM
+            logger.info(f"根据intent '{query_intent}' 动态加载算法配置: {algorithm}")
+        except Exception as e:
+            logger.warning(f"动态加载intent配置失败，使用默认算法: {str(e)}")
+            algorithm = "pipeline"
+            alpha = 0.5
         
         try:
             if algorithm == 'rrf':
@@ -215,9 +211,6 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             logger.warning(f"sparse向量生成失败，降级为dense检索: {str(e)}")
             return self._fallback_to_dense(query_text, top_k, filter_dict, db_conn, embedding_model)
         
-        # 计算RRF参数
-        rrf_params = self._calculate_rrf_params(alpha, top_k)
-        
         # 执行RRF混合搜索（如失败降级dense）
         try:
             if db_conn and hasattr(db_conn, 'hybrid_search'):
@@ -229,8 +222,7 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
                     rerank=rerank,
                     algorithm='rrf',
                     sparse_vector=sparse_vector,
-                    dense_vector=query_embedding,
-                    rrf_params=rrf_params
+                    dense_vector=query_embedding
                 )
                 
                 # 添加调试日志，了解返回数据的结构
@@ -313,62 +305,14 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             logger.warning(f"Pipeline混合检索失败: {str(e)}，降级为dense检索")
             return self._fallback_to_dense(query_text, top_k, filter_dict, db_conn, embedding_model)
     
-    def _calculate_rrf_params(self, alpha: float, top_k: int) -> dict:
-        """
-        计算RRF算法参数
-        
-        RRF (Reciprocal Rank Fusion) 算法参数说明：
-        
-        Args:
-            alpha: 混合搜索权重参数，控制BM25和向量搜索的权重分配
-            top_k: 搜索返回的文档数量
-            
-        Returns:
-            dict: 包含RRF算法参数的字典
-            
-        RRF参数业务意义：
-        
-        1. window_size (窗口大小):
-           - 定义：RRF算法在计算融合分数时考虑的候选文档数量
-           - 作用：控制参与排名融合的文档范围
-           - 优化方向：越大越好，建议 top_k * 4
-           - 原因：更大的窗口能捕获更多潜在的优质文档，给RRF算法更多选择空间
-           
-        2. rank_constant (排名常数):
-           - 定义：RRF公式中的平滑常数，防止分母为0
-           - 作用：控制排名融合的敏感度和稳定性
-           - 优化方向：越小越好，建议 10 或 5
-           - 原因：更小的常数让排名差异更明显，提高算法的区分度
-           
-        RRF公式：score = 1 / (rank_constant + rank)
-        
-        注意事项：
-        - window_size过大可能增加计算开销，但通常值得
-        - rank_constant过小可能导致排名差异过于敏感，建议不要小于5
-        - 需要在效果提升和计算效率之间找到平衡点
-        """
-        # alpha控制稀疏向量和密集向量的权重
-        # 这里可以根据alpha值调整RRF参数
-        return {
-            "window_size": top_k * RRF_WINDOW_MULTIPLIER,
-            "rank_constant": RRF_RANK_CONSTANT
-        }
+
     
 
     
     def get_type(self) -> str:
         return "hybrid"
 
-    def get_capabilities(self) -> Dict[str, Any]:
-        """获取搜索引擎能力信息"""
-        return {
-            "type": "hybrid",
-            "description": "融合dense和sparse的混合检索",
-            "supports_filtering": True,
-            "supports_hybrid": True,
-            "embedding_model": EMBADDING_MODEL,
-            "hybrid_alpha": HYBRID_ALPHA
-        } 
+ 
     
     def _format_hybrid_result(self, opensearch_results: dict) -> list:
         """
@@ -458,154 +402,3 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
         # 复用基类的composite方法
         return self.composite(rerank_results, query_text, search_engine)
 
-    # ========== 混合搜索优化方法骨架 ==========
-    
-    def _build_heading_query(self, query: str) -> dict:
-        """构建层级标题查询，权重递减"""
-        from config import HEADING_WEIGHTS
-        
-        # 使用配置权重，动态构建字段列表
-        fields = [
-            f"{field}^{weight}" 
-            for field, weight in HEADING_WEIGHTS.items()
-        ]
-        
-        return {
-            "multi_match": {
-                "query": query,
-                "fields": fields,
-                "type": "best_fields",
-                "tie_breaker": 0.3
-            }
-        }
-    
-    # 删除重复的_log_score_analysis方法，使用基类的方法
-    
-    def _calculate_content_boost(self, query: str) -> float:
-        """根据查询特性动态计算正文权重（带边界检查）"""
-        from config import QUERY_LENGTH_THRESHOLDS, BOOST_WEIGHTS
-        
-        query_length = len(query.split())
-        
-        # 获取阈值配置（带默认值）
-        short_threshold = QUERY_LENGTH_THRESHOLDS.get('short', 4)
-        long_threshold = QUERY_LENGTH_THRESHOLDS.get('medium', 8)
-        
-        # 长查询/详细描述 - 提高正文权重
-        if query_length > long_threshold:
-            return BOOST_WEIGHTS.get('long_query', 1.4)
-        
-        # 中等长度查询
-        elif query_length > short_threshold:
-            return BOOST_WEIGHTS.get('medium_query', 1.2)
-        
-        # 短查询/关键词 - 降低正文权重，侧重标题
-        else:
-            return BOOST_WEIGHTS.get('short_query', 0.8)
-    
-    def _build_content_query(self, query: str) -> dict:
-        """构建正文字段查询"""
-        return {
-            "match": {
-                "text": {
-                    "query": query,
-                    "boost": self._calculate_content_boost(query),
-                    "operator": "or"
-                }
-            }
-        }
-    
-    def _build_metadata_query(self, query: str) -> dict:
-        """构建元数据字段查询"""
-        return {
-            "multi_match": {
-                "query": query,
-                "fields": [
-                    "section_heading^1.5",    # 章节标题
-                    "content_type^1.3",       # 内容类型
-                    "chunk_type^1.2",         # 块类型
-                    "faction^1.0"             # 阵营
-                ],
-                "type": "best_fields"
-            }
-        }
-    
-    def _build_content_type_filter(self, query: str) -> dict:
-        """根据查询内容智能添加内容类型过滤"""
-        # 规则相关查询
-        if any(word in query for word in ["规则", "规则书", "codex", "FAQ"]):
-            return {"content_type": "corerule"}
-        
-        # 单位相关查询
-        elif any(word in query for word in ["单位", "模型", "unit", "数据表"]):
-            return {"chunk_type": "unit_data"}
-        
-        # 背景相关查询
-        elif any(word in query for word in ["背景", "故事", "lore", "历史"]):
-            return {"content_type": "background"}
-        
-        return {}
-    
-    def _build_hybrid_query_optimized(self, query: str, query_vector: list, 
-                                     filter: dict = None, top_k: int = 20) -> dict:
-        """构建优化后的混合搜索查询"""
-        
-        # 1. 层级标题查询
-        heading_query = self._build_heading_query(query)
-        
-        # 2. 正文字段查询
-        content_query = self._build_content_query(query)
-        
-        # 3. 元数据查询
-        metadata_query = self._build_metadata_query(query)
-        
-        # 4. 向量搜索
-        knn_query = {
-            "knn": {
-                "embedding": {
-                    "vector": query_vector,
-                    "k": min(100, top_k * 3),  # 扩大召回池
-                    "boost": 1.0
-                }
-            }
-            }
-        
-        # 5. 组合查询
-        hybrid_query = {
-            "hybrid": {
-                "queries": [
-                    heading_query,      # 层级标题
-                    content_query,      # 正文内容
-                    metadata_query,     # 元数据
-                    knn_query          # 向量搜索
-                ]
-            }
-        }
-        
-        # 6. 智能过滤（不覆盖用户显式设置的过滤条件）
-        if filter:
-            smart_filter = self._build_content_type_filter(query)
-            if smart_filter:
-                # 只添加用户未指定的过滤条件，避免覆盖用户设置
-                for key, value in smart_filter.items():
-                    if key not in filter:
-                        filter[key] = value
-            
-            # 构建过滤条件（简化版本，直接使用 term 查询）
-            filter_queries = []
-            for field, value in filter.items():
-                if isinstance(value, str):
-                    filter_queries.append({"term": {field: value}})
-                elif isinstance(value, list):
-                    filter_queries.append({"terms": {field: value}})
-            
-            if filter_queries:
-                hybrid_query["hybrid"]["filter"] = filter_queries
-        
-        return {
-            "size": top_k,
-            "query": {
-                "hybrid": hybrid_query["hybrid"]  # 正确提取 hybrid 对象
-            }
-        }
-    

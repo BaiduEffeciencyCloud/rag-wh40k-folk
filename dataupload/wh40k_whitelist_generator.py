@@ -27,23 +27,6 @@ class WH40KWhitelistGenerator:
         
         return list(set(phrases))  # 去重
     
-    def generate_wh40k_whitelist(self, output_path: str) -> str:
-        """生成专业术语白名单"""
-        phrases = self.extract_wh40k_phrases()
-        
-        # 生成BM25白名单格式：term frequency pos
-        with open(output_path, 'w', encoding='utf-8') as f:
-            for phrase in phrases:
-                # 使用默认频率1，词性n（名词）
-                # trim掉前后空格，保留中间空格
-                clean_phrase = phrase.strip()
-                if ' ' in clean_phrase:
-                    f.write(f'"{clean_phrase}" 1 n\n')
-                else:
-                    f.write(f"{clean_phrase} 1 n\n")
-        
-        return output_path
-    
     def _load_vocabulary(self) -> Dict[str, List[Dict[str, Any]]]:
         """加载专业术语词典"""
         return self.vocab_mgr.get_vocab()

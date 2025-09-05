@@ -9,6 +9,7 @@ import sys
 import json
 import logging
 import argparse
+import config
 from datetime import datetime
 from typing import Dict, Any, List
 from dataupload.data_vector_v3 import SemanticDocumentChunker
@@ -35,14 +36,10 @@ def parse_arguments():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description='VocabMgr - 专业术语词典管理器')
     parser.add_argument('doc_path', help='文档文件路径')
-    parser.add_argument('--save-output', action='store_true', help='保存结果到文件')
-    parser.add_argument('--output-path', default='vocab_extraction_results.json', help='输出文件路径')
-    parser.add_argument('--verbose', '-v', action='store_true', help='详细输出')
+    parser.add_argument('--record-change', action='store_true', help='记录本次抽取结果到默认路径')
     parser.add_argument('--update-dict', action='store_true', help='更新词典文件')
     parser.add_argument('--overwrite', '--ow', action='store_true', help='强制覆盖现有词典记录')
-    parser.add_argument('--vocab-path', default='dict/wh40k_vocabulary', help='词典路径')
-    parser.add_argument('--export', action='store_true', help='导出OpenSearch分析器格式文件')
-    parser.add_argument('--output', default='docker/opensearch-config/analysis/', help='OpenSearch配置文件输出目录')
+    parser.add_argument('--export-syn', action='store_true', help='仅导出同义词文件（不导出术语词典）')
     
     if len(sys.argv) == 1:
         parser.print_help()
@@ -253,8 +250,7 @@ def main():
         args = parse_arguments()
         
         # 设置详细输出
-        if args.verbose:
-            logging.getLogger().setLevel(logging.DEBUG)
+        # 移除 verbose 参数，保持默认日志级别
         
         # 记录开始时间
         start_time = datetime.now()
@@ -267,11 +263,13 @@ def main():
         chunks = chunk_document(text)
         
         # 3. 抽取术语
-        extracted_terms = extract_terms_from_chunks(chunks, args.vocab_path)
+        # 词典路径使用配置常量
+ 
+        extracted_terms = extract_terms_from_chunks(chunks, config.VOCAB_EXPORT_DIR)
         
         # 4. 保存到词典（如果指定）
         if args.update_dict:
-            success = save_terms_to_vocabulary(extracted_terms, args.vocab_path, args.overwrite)
+            success = save_terms_to_vocabulary(extracted_terms, config.VOCAB_EXPORT_DIR, args.overwrite)
             if not success:
                 logger.warning("词典更新失败，但继续执行")
         
@@ -283,23 +281,25 @@ def main():
         }
         display_results(extracted_terms, stats)
         
-        # 6. 保存结果文件（如果指定）
-        if args.save_output:
-            save_results_to_file(extracted_terms, args.output_path)
+        # 6. 记录抽取结果（如果指定）
+        if getattr(args, 'record_change', False):
+            # 默认保存到 dict/record/YYMMDDHHMMSS_vocab_extraction_results.json
+            ts = datetime.now().strftime('%y%m%d%H%M%S')
+            output_dir = os.path.join('dict', 'record')
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(output_dir, f"{ts}_vocab_extraction_results.json")
+            save_results_to_file(extracted_terms, output_path)
         
-        # 7. 导出OpenSearch格式（如果指定）
-        if args.export:
-            from vocab_mgr.vocab_loader import VocabLoad
-            vocab_loader = VocabLoad(vocab_path=args.vocab_path)
-            export_result = vocab_loader.export_for_opensearch(args.output)
-            
-            if export_result["success"]:
-                logger.info("OpenSearch格式导出成功")
-                logger.info(f"术语文件: {export_result['dict_file']}")
-                logger.info(f"同义词文件: {export_result['synonyms_file']}")
-                logger.info(f"导出统计: {export_result['stats']}")
+        # 7. 仅导出同义词（如指定）
+        if getattr(args, 'export_syn', False):
+            vocab_loader = VocabLoad(vocab_path=config.VOCAB_EXPORT_DIR)
+            syn_result = vocab_loader.export_synonyms_only(None)
+            if syn_result["success"]:
+                logger.info("同义词导出成功")
+                logger.info(f"同义词文件: {syn_result['synonyms_file']}")
+                logger.info(f"导出统计: {syn_result['stats']}")
             else:
-                logger.error(f"OpenSearch格式导出失败: {export_result['message']}")
+                logger.error(f"同义词导出失败: {syn_result['message']}")
         
         logger.info("处理完成")
         

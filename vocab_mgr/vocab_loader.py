@@ -389,6 +389,67 @@ class VocabLoad:
                 },
                 "message": f"导出失败: {str(e)}"
             }
+    
+    def export_synonyms_only(self, output_dir: str = None) -> Dict[str, Any]:
+        """仅导出同义词文件（不生成术语词典）"""
+        try:
+            logger.info("开始仅导出同义词文件")
+            logger.info(f"输出目录: {output_dir}")
+
+            # 参数与输出目录
+            if output_dir is None:
+                output_dir = VOCAB_EXPORT_DIR
+            if not output_dir:
+                output_dir = VOCAB_EXPORT_DIR
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir, exist_ok=True)
+
+            # 仅收集同义词
+            synonyms = self._collect_synonyms()
+            logger.info(f"收集到同义词组: {len(synonyms)} 组")
+
+            # Solr 格式校验（仅对同义词）
+            validation_result = self._validate_solr_format(synonyms)
+            if not validation_result["passed"]:
+                logger.warning(f"Solr格式检验失败，错误数: {len(validation_result['errors'])}")
+
+            # 同义词文件路径
+            synonyms_file = os.path.join(output_dir, "warhammer_synonyms.txt")
+
+            # 生成同义词文件
+            synonyms_success = self._generate_synonyms_file(synonyms, synonyms_file)
+
+            result = {
+                "success": bool(synonyms_success),
+                "synonyms_file": synonyms_file if synonyms_success else "",
+                "stats": {
+                    "total_synonyms": len(synonyms),
+                    "validation_passed": validation_result["passed"],
+                    "validation_errors": validation_result["errors"]
+                },
+                "message": "同义词导出成功" if synonyms_success else "同义词导出失败"
+            }
+
+            if synonyms_success:
+                logger.info("同义词导出成功")
+                logger.info(f"同义词文件: {synonyms_file}")
+            else:
+                logger.error("同义词导出失败")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"仅导出同义词失败: {e}")
+            return {
+                "success": False,
+                "synonyms_file": "",
+                "stats": {
+                    "total_synonyms": 0,
+                    "validation_passed": False,
+                    "validation_errors": [f"导出过程发生异常: {str(e)}"]
+                },
+                "message": f"导出失败: {str(e)}"
+            }
         
     def _generate_dict_file(self, terms: List[str], output_path: str) -> bool:
         """生成术语词典文件"""

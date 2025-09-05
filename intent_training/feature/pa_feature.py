@@ -10,6 +10,7 @@ import logging
 import numpy as np
 import joblib
 import os
+import sys
 import threading
 from typing import Dict, List, Tuple, Any
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -17,6 +18,21 @@ from difflib import SequenceMatcher
 import jieba
 from .base import BaseFeatureExtractor
 from .complexity import ComplexityCalculator
+from sentence_transformers import SentenceTransformer
+
+# 导入 ModelManager 用于预加载模型支持
+try:
+    import sys
+    import os
+    # 添加 rag-api-local 目录到 Python 路径
+    rag_api_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../rag-api-local'))
+    if rag_api_path not in sys.path:
+        sys.path.insert(0, rag_api_path)
+    
+    # 直接导入 ModelManager，保持单例模式
+    from app.services.model_manager import ModelManager  # type: ignore
+except Exception:
+    ModelManager = None
 
 logger = logging.getLogger(__name__)
 
@@ -505,69 +521,145 @@ class EnhancedFeatureExtractor(BaseFeatureExtractor):
         return fused_features
     
     def get_sentence_embedding(self, sentences: List[str]) -> np.ndarray:
-        """获取批量句向量特征（线程安全）"""
-        # 使用双重检查锁定模式确保线程安全
+        """获取批量句向量特征（优先使用预加载模型）"""
+        logger.info(f"🚀 pa_feature: get_sentence_embedding 被调用，输入句子数: {len(sentences)}")
+        
+        # 处理空列表
+        if len(sentences) == 0:
+            logger.info("📝 pa_feature: 输入句子列表为空，返回空矩阵")
+            return np.zeros((0, 768))
+        
+        # 获取模型（预加载优先，懒加载兜底）
+        logger.info("🔍 pa_feature: 开始获取模型...")
+        model = self._get_model()
+        if model is None:
+            logger.warning("⚠️ pa_feature: 无法获取模型，返回零向量")
+            return np.zeros((len(sentences), 768))
+        
+        # 统一提取句向量
+        logger.info("🔍 pa_feature: 开始提取句向量...")
+        return self._extract_embeddings(model, sentences)
+    
+    def _get_model(self):
+        """统一获取 SentenceTransformer 模型"""
+        # 1. 尝试预加载模型
+        try:
+            if ModelManager is not None:
+                logger.info("🔍 pa_feature: 开始检查预加载模型...")
+                model_manager = ModelManager()
+                logger.info(f"🔍 pa_feature: ModelManager实例ID: {id(model_manager)}")
+                
+                # 检查已加载的模型列表
+                loaded_models = model_manager.get_loaded_models()
+                logger.info(f"🔍 pa_feature: ModelManager已加载模型: {loaded_models}")
+                
+                preloaded_model = model_manager.get_sentence_transformer()
+                if preloaded_model is not None:
+                    logger.info("✅ pa_feature: 成功从内存获取预加载的 SentenceTransformer 模型")
+                    logger.info(f"🔍 pa_feature: 预加载模型对象ID: {id(preloaded_model)}")
+                    return preloaded_model
+                else:
+                    logger.warning("⚠️ pa_feature: ModelManager中没有预加载的模型")
+            else:
+                logger.warning("⚠️ pa_feature: ModelManager为None，无法使用预加载模型")
+        except Exception as e:
+            logger.warning(f"❌ pa_feature: 使用预加载模型失败: {e}，回退到懒加载模式")
+        
+        # 2. 回退到懒加载模型
+        if hasattr(self, 'sentence_model') and self.sentence_model is not None:
+            logger.info("🔄 pa_feature: 使用已缓存的懒加载模型")
+            return self.sentence_model
+        
+        # 3. 懒加载模型（保持原有的复杂逻辑作为兜底）
         if not self._model_loaded:
+            logger.info("🌐 pa_feature: 开始从网络懒加载模型...")
             with self._model_lock:
                 # 双重检查
                 if not self._model_loaded:
                     try:
-                        from sentence_transformers import SentenceTransformer
+                        # 先设置环境变量，再导入SentenceTransformer
                         enhanced_config = self.config.get('advanced_feature', {}).get('enhanced', {})
                         sentence_model = enhanced_config.get('sentence_model', 'shibing624/text2vec-base-chinese')
+                        
+                        # 检查sentence_model是否为None
+                        if sentence_model is None:
+                            logger.error("sentence_model is None, using default")
+                            sentence_model = 'shibing624/text2vec-base-chinese'
+
+                        logger.info(f"🌐 pa_feature: 准备从网络加载模型: {sentence_model}")
 
                         # 从配置中获取网络设置
                         network_timeout = enhanced_config.get('network_timeout', 30)
                         allow_offline = enhanced_config.get('allow_offline', True)
                         fallback_to_zero = enhanced_config.get('fallback_to_zero', True)
+                        force_offline = enhanced_config.get('force_offline', False)
 
-                        # 设置环境变量
-                        import os
+                        # 设置环境变量（必须在导入SentenceTransformer之前）
                         os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = str(network_timeout)
-                        os.environ['HF_HUB_OFFLINE'] = '1' if allow_offline else '0'
-
+                        # 使用中国 HuggingFace 镜像站点解决 SSL 问题
+                        os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+                        
+                        if force_offline or allow_offline:
+                            # 设置所有相关的离线环境变量
+                            os.environ['HF_HUB_OFFLINE'] = '1'
+                            os.environ['TRANSFORMERS_OFFLINE'] = '1'
+                            os.environ['HF_DATASETS_OFFLINE'] = '1'
+                            os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
+                            os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = '1'
+                            os.environ['HF_HUB_DISABLE_EXPERIMENTAL_WARNING'] = '1'
+                            logger.info("🌐 pa_feature: 设置离线模式: HF_HUB_OFFLINE=1, TRANSFORMERS_OFFLINE=1, HF_DATASETS_OFFLINE=1")
+                        else:
+                            os.environ['HF_HUB_OFFLINE'] = '0'
+                            logger.info("🌐 pa_feature: 设置在线模式: HF_HUB_OFFLINE=0, 使用中国镜像站点: https://dl.aifasthub.com")
+                        
                         # 尝试加载模型
-                        self.sentence_model = SentenceTransformer(sentence_model)
-                        self._model_loaded = True
-                        logger.info("句向量模型加载成功")
+                        try:
+                            logger.info("🌐 pa_feature: 开始从网络下载并加载模型...")
+                            # 直接使用模型名加载（现在使用镜像站点）
+                            self.sentence_model = SentenceTransformer(sentence_model)
+                            self._model_loaded = True
+                            logger.info("🌐 pa_feature: 网络懒加载模式：句向量模型加载成功")
+                            logger.info(f"🔍 pa_feature: 懒加载模型对象ID: {id(self.sentence_model)}")
+                            return self.sentence_model
+                        except Exception as model_error:
+                            logger.error(f"🌐 pa_feature: 网络懒加载模式：SentenceTransformer加载失败: {model_error}")
+                            if fallback_to_zero:
+                                logger.warning("将使用零向量代替句向量特征")
+                                self.sentence_model = None
+                                self._model_loaded = True
+                                return None
+                            else:
+                                raise model_error
 
                     except ImportError:
                         logger.warning("sentence-transformers未安装，使用零向量代替")
                         self.sentence_model = None
                         self._model_loaded = True  # 标记为已处理
-                        return np.zeros((len(sentences), 768))
+                        return None
                     except Exception as e:
-                        logger.error(f"句向量模型加载失败: {e}")
+                        logger.error(f"🌐 pa_feature: 网络懒加载模式：句向量模型加载失败: {e}")
                         if fallback_to_zero:
                             logger.warning("将使用零向量代替句向量特征")
                             self.sentence_model = None
                             self._model_loaded = True  # 标记为已处理
-                            return np.zeros((len(sentences), 768))
+                            return None
                         else:
                             # 如果不允许回退，则抛出异常
                             raise e
         
-        # 如果模型加载失败，直接返回零向量
-        if self.sentence_model is None:
-            return np.zeros((len(sentences), 768))
-        
-        # 处理空列表
-        if len(sentences) == 0:
-            return np.zeros((0, 768))
-        
+        return self.sentence_model
+    
+    def _extract_embeddings(self, model, sentences: List[str]) -> np.ndarray:
+        """使用指定模型提取句向量"""
         try:
-            logger.info(f"开始提取批量句向量特征，样本数: {len(sentences)}")
-            embeddings = self.sentence_model.encode(sentences, batch_size=64, show_progress_bar=True)
-            logger.info(f"批量句向量提取成功，维度: {embeddings.shape}")
-            return embeddings  # 返回(N, 768)矩阵
+            logger.info(f"🔍 pa_feature: 开始提取批量句向量特征，样本数: {len(sentences)}")
+            logger.info(f"🔍 pa_feature: 使用模型对象ID: {id(model)}")
+            embeddings = model.encode(sentences, batch_size=64, show_progress_bar=True)
+            logger.info(f"✅ pa_feature: 句向量提取成功，维度: {embeddings.shape}")
+            return embeddings
         except Exception as e:
-            logger.error(f"批量句向量提取失败: {e}")
-            if fallback_to_zero:
-                logger.warning("使用零向量作为兜底")
-                return np.zeros((len(sentences), 768))
-            else:
-                # 如果不允许回退，则抛出异常
-                raise e
+            logger.error(f"❌ pa_feature: 句向量提取失败: {e}")
+            return np.zeros((len(sentences), 768))
     
     def get_enhanced_intent_features(self, sentence: str) -> np.ndarray:
         """获取增强的意图特征（包含句向量）"""

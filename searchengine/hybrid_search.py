@@ -32,7 +32,9 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             import glob
             self.bm25_config = BM25Config()
             # 自动查找最新白名单userdict
-            whitelist_files = glob.glob(os.path.join("dict", "all_docs_dict_*.txt"))
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            dict_dir = os.path.join(project_root, "dict")
+            whitelist_files = glob.glob(os.path.join(dict_dir, "all_docs_dict_*.txt"))
             whitelist_files = [f for f in whitelist_files if not f.endswith(".meta.json")]
             whitelist_path = None
             if whitelist_files:
@@ -48,11 +50,16 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
                 max_vocab_size=self.bm25_config.max_vocab_size,
                 user_dict_path=whitelist_path
             )
-            vocab_path = self.bm25_manager.get_latest_freq_dict_file()
+            # 使用项目根目录的绝对路径
+            # 从searchengine/hybrid_search.py -> 项目根目录
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            dict_dir = os.path.join(project_root, "dict")
+            vocab_path = self.bm25_manager.get_latest_freq_dict_file(dict_dir)
             if not vocab_path or not os.path.exists(vocab_path):
                 logger.error("未找到有效的词汇表文件")
                 raise FileNotFoundError("未找到有效的词汇表文件")
-            model_path = self.bm25_config.get_model_path()
+            # 使用项目根目录的绝对路径
+            model_path = os.path.join(project_root, self.bm25_config.get_model_path())
             if os.path.exists(model_path):
                 self.bm25_manager.load_model(model_path, vocab_path)
                 logger.info(f"成功加载BM25模型，模型路径: {model_path}, 词典路径: {vocab_path}")

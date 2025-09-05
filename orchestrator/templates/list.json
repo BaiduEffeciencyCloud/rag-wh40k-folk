@@ -1,0 +1,8 @@
+{
+    "qp": "straight",
+    "se": "hybrid",
+    "ps": "mmr", 
+    "agg": "list",
+    "rerank": true,
+    "topk": 60
+}

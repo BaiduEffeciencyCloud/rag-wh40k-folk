@@ -34,7 +34,7 @@ class DynamicAggregation(AggregationInterface):
                 seen.add(ans)
         return deduped
 
-    def _load_prompt(self, context: List[str], query: str) -> List[Dict[str, str]]:
+    def _load_prompt(self, context: List[str], query: str, params: Dict[str, Any] = None) -> List[Dict[str, str]]:
         """
         1. 读取system.json作为system prompt
         2. 读取template.json作为user prompt
@@ -53,24 +53,37 @@ class DynamicAggregation(AggregationInterface):
                 system_data = json.load(f)
             system_prompt = system_data.get('system_prompt', '')
 
-            # 3. 读取user prompt模板
-            user_template_path = os.path.join(TEMPLATE_DIR, f'{self.template}.json')
+            # 3. 动态选择user prompt模板
+            # 优先使用params中的intent，如果没有则使用初始化时的template
+            template_name = 'default'
+            if params and 'intent' in params:
+                template_name = params['intent']
+                logger.info(f"使用动态意图模板: {template_name}")
+            else:
+                template_name = self.template
+                logger.info(f"使用初始化模板: {template_name}")
+            
+            # 4. 读取user prompt模板
+            user_template_path = os.path.join(TEMPLATE_DIR, f'{template_name}.json')
             if not os.path.exists(user_template_path):
+                logger.warning(f"意图模板 {template_name}.json 不存在，使用默认模板")
                 user_template_path = os.path.join(TEMPLATE_DIR, 'default.json')
+            
             with open(user_template_path, 'r', encoding='utf-8') as f:
                 user_data = json.load(f)
             user_prompt = user_data.get('user_prompt', '')
 
-            # 4. 如果user_prompt为空，自动降级为default.json
+            # 5. 如果user_prompt为空，自动降级为default.json
             if not user_prompt.strip() and not user_template_path.endswith('default.json'):
                 with open(os.path.join(TEMPLATE_DIR, 'default.json'), 'r', encoding='utf-8') as f:
                     default_data = json.load(f)
                 user_prompt = default_data.get('user_prompt', '')
 
-            # 5. 如果default.json也为空，兜底只输出context和query
+            # 6. 如果default.json也为空，兜底只输出context和query
             if not user_prompt.strip():
                 user_prompt = f"上下文信息:{context_str}\n用户问题：\"{query_str}\""
-            # 6. 使用build_messages组合为List，确保包含type字段
+            
+            # 7. 使用build_messages组合为List，确保包含type字段
             messages = build_messages(
                 system_prompt={"content": system_prompt, "type": "text"},
                 user_prompt={"content": f"{user_prompt}\n上下文信息:{context_str}\n用户问题：\"{query_str}\"", "type": "text"}
@@ -80,14 +93,14 @@ class DynamicAggregation(AggregationInterface):
             logger.error(f"加载prompt模板失败: {str(e)}")
             return [{"role": "error", "content": f"聚合出错: {str(e)}"}]
 
-    def semantic_parse(self, query: str, context: List[str]) -> str:
+    def semantic_parse(self, query: str, context: List[str], params: Dict[str, Any] = None) -> str:
         # 这里只拼装prompt，不直接调用LLM
-        return self._load_prompt(context, query)
+        return self._load_prompt(context, query, params)
 
     def aggregate(self, search_results, query: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         answers = self.extract_answer(search_results)
         deduped = self._deduplicate_answers(answers)
-        prompt_text = self.semantic_parse(query, deduped) if deduped else "未检索到有效答案"
+        prompt_text = self.semantic_parse(query, deduped, params) if deduped else "未检索到有效答案"
         # 1. 生成llm实例
         llm_instance = LLMFactory.create_llm(LLM_TYPE)
         # 2. 用llm_instance.build_messages生成prompt（Qwen等自动适配格式）

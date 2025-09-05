@@ -45,6 +45,15 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     logger.warning("OPENAI_API_KEY not found in environment variables")
 
+# ALIYUN OSS 配置
+OSS_ACCESS_KEY = os.getenv("OSS_ACCESS_KEY")
+OSS_ACCESS_KEY_SECRET = os.getenv("OSS_ACCESS_SECRET")
+OSS_ENDPOINT = "https://oss-cn-beijing.aliyuncs.com"
+OSS_BUCKET_NAME_DICT = "rag-dict"
+OSS_BUCKET_NAME_MODELS = "rag-models"
+OSS_BUCKET_NAME_PARAMS = "rag-params"
+OSS_REGION = "cn-beijing"
+
 
 # OpenSearch API配置
 OPENSEARCH_URI=os.getenv("OPENSEARCH_URI")
@@ -76,25 +85,14 @@ NEO4J_TEST_PASSWORD = os.getenv("NEO4J_TEST_PASSWORD")
 if not all([NEO4J_TEST_URI, NEO4J_TEST_USERNAME, NEO4J_TEST_PASSWORD]):
     logger.warning("Neo4j test configuration incomplete. Please set NEO4J_TEST_URI, NEO4J_TEST_USERNAME, and NEO4J_TEST_PASSWORD in .env file")
 
-
-
 # 答案生成配置
-DEFAULT_TEMPERATURE = 0.2  # 默认温度参数，控制生成文本的随机性
+DEFAULT_TEMPERATURE = 0.3  # 默认温度参数，控制生成文本的随机性
 MAX_ANSWER_TOKENS = 2000  # 答案生成最大token数
-
 
 # 并发配置
 DEFAULT_MAX_WORKERS = 4  # 默认RAGAS最大并发工作线程数
 
 
-
-
-
-# ========== 网络连接配置 ==========
-CONNECT_TIMEOUT = 120  # 连接超时（秒）
-READ_TIMEOUT = 120  # 读取超时（秒）
-MAX_RETRIES = 4  # 重试次数
-RETRY_DELAY = 2.0  # 重试延迟（秒）
 
 # 指数退避配置
 USE_EXPONENTIAL_BACKOFF = True  # 是否使用指数退避策略
@@ -103,6 +101,8 @@ MAX_BACKOFF_DELAY = 30.0  # 最大退避延迟（秒）
 
 # LLM类型,包括 Openai, Deepseek, Gemini,QWEN
 LLM_TYPE="qwen"
+EMBEDDING_TYPE="qwen"
+DB_TYPE="opensearch"
 # OPEN AI LLM模型
 LLM_MODEL = "gpt-4o"  # OpenAI LLM模型名称
 LLM_IMAGE_MODEL = "gpt-4o"  # OpenAI图像模型名称
@@ -117,7 +117,6 @@ QWEN_DIMENSION = 2048  # QWEN嵌入向量维度
 QWEN_LLM_SERVER = "https://dashscope.aliyuncs.com/compatible-mode/v1" #QWEN 服务器地址
 QWEN_LLM_MODEL = "qwen-plus" #QWEN 模型名称
 
-
 # DEEPSEEK API配置
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_SERVER="https://api.deepseek.com/v1"
@@ -126,29 +125,7 @@ DEEPSEEK_MODEL="deepseek-chat"
 
 #检索分析调试配置
 DEBUG_ANALYZE = True  # 搜索分析调试开关，默认关闭
-# 搜索分析日志配置
-#SEARCH_ANALYSIS_LOG_FILE = "log/search_analysis.log"  # 搜索分析日志文件路径
-#SEARCH_ANALYSIS_LOG_MAX_SIZE = 5 * 1024 * 1024  # 搜索分析日志最大文件大小（5MB）
 
-# Hybrid检索配置
-#当 α = 0 时，完全依赖稀疏检索（纯 BM25/TF-IDF）；
-#当 α = 1 时，完全依赖密集检索（纯语义向量匹配）；
-# HYBRID_ALPHA = 0.6
-# 混合搜索算法选择
-# 可选值: 'pipeline' (默认) 或 'rrf'
-#HYBRID_ALGORITHM = 'pipeline'
-
-# ========== RRF混合搜索配置 ==========
-# RRF (Reciprocal Rank Fusion) 算法参数配置
-#RRF_RANK_CONSTANT = 8  # RRF排名常数，越小区分度越高，建议5-15
-#RRF_WINDOW_MULTIPLIER = 3  # RRF窗口大小倍数，越大捕获文档越多，建议3-5
-#RRF_MAX_WINDOW_SIZE = 300  # RRF窗口大小最大值，防止过大的计算开销
-#RRF_SPARSE_TERMS_BOOST = 1.5  # RRF稀疏向量terms查询的boost值，提高稀疏向量查询权重
-#RRF_DEFAULT_RANK_CONSTANT = 20  # 标准RRF常数，用于RRF算法中的平滑参数
-
-# RRF混合搜索权重配置
-#RRF_SPARSE_WEIGHT = 0.8  # RRF稀疏向量查询权重
-#RRF_DENSE_WEIGHT = 1.2 # RRF密集向量查询权重
 
 # ========== Pipeline混合搜索配置 ==========
 # Pipeline混合搜索算法参数配置
@@ -159,7 +136,6 @@ PIPELINE_VECTOR_BOOST = 1.0  # 向量搜索boost值，影响向量搜索结果�
 
 # ========== Match Phrase查询配置 ==========
 # Match Phrase查询算法参数配置
-
 
 # ========== 混合搜索优化配置 ==========
 # OpenSearch Analyzer配置
@@ -173,31 +149,6 @@ SEARCH_FIELD_WEIGHTS = {
     "content_type": 1.0,       # 内容类型权重
     "chunk_type": 1.4,         # 块类型权重
     "faction": 1.3             # 阵营权重
-}
-
-# 标题权重配置
-HEADING_WEIGHTS = {
-    'h1': 1.0,
-    'h2': 1.5,
-    'h3': 1.6,
-    'h4': 0.6,
-    'h5': 0.5,
-    'h6': 0.4
-}
-
-
-
-# 查询长度阈值配置
-QUERY_LENGTH_THRESHOLDS = {
-    'short': 12,
-    'medium': 20
-}
-
-# 正文权重配置
-BOOST_WEIGHTS = {
-    'long_query': 1.4,    # 长查询权重
-    'medium_query': 1.2,  # 中等查询权重
-    'short_query': 1.2    # 短查询权重
 }
 
 # rerank 模型
@@ -231,8 +182,6 @@ BM25_SAVE_AFTER_UPDATE = True  # 更新后是否保存模型
 BM25_BATCH_SIZE = 1000  # 批处理大小
 BM25_CACHE_SIZE = 1000  # 缓存大小
 
-
-
 # Pinecone稀疏向量限制
 PINECONE_MAX_SPARSE_VALUES = 2048  # Pinecone单个稀疏向量的最大非零元素数量
 
@@ -242,19 +191,20 @@ phrase_weight_scorer = PhraseWeightScorer(
     boost_factors=(0.2, 0.1, 0.0, -0.5)
 )
 
-# 日志配置
-LOG_FORMAT = os.getenv("LOG_FORMAT", '%(asctime)s - %(levelname)s - %(message)s')
-LOG_FILE = os.getenv("LOG_FILE", 'app.log')
-LOG_LEVEL = os.getenv("LOG_LEVEL", 'INFO')
-
-# 应用配置
-APP_TITLE = os.getenv("APP_TITLE", "战锤40K规则助手")
-APP_ICON = os.getenv("APP_ICON", "⚔️")
-APP_HEADER = os.getenv("APP_HEADER", "")
-
 # 默认输入输出目录常量
 INPUT_DIR = 'test/testdata'
 OUTPUT_DIR = 'dict' 
-
 # 词典的导出位置
 VOCAB_EXPORT_DIR = 'dict/wh40k_vocabulary'
+
+# ========== 网络连接配置 ==========
+CONNECT_TIMEOUT = 120  # 连接超时（秒）
+READ_TIMEOUT = 120  # 读取超时（秒）
+MAX_RETRIES = 4  # 重试次数
+RETRY_DELAY = 2.0  # 重试延迟（秒）
+
+# ========== ALIYUN配置 ==========
+
+# === OSS配置 ===
+CLOUD_STORAGE=True
+

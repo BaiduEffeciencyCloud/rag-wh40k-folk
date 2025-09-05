@@ -1,0 +1,9 @@
+{
+    "qp": "straight",
+    "se": "hybrid", 
+    "ps": "simple",
+    "agg": "query",
+    "rerank": true,
+    "topk": 40
+}
+

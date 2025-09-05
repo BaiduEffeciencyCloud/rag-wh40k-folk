@@ -20,6 +20,23 @@ from typing import Dict, List, Any
 from sklearn.feature_extraction.text import TfidfVectorizer
 from .base import BaseFeatureExtractor
 from .complexity import ComplexityCalculator
+from sentence_transformers import SentenceTransformer
+
+# 导入 ModelManager 用于预加载模型支持
+try:
+
+    # 添加 rag-api-local 目录到 Python 路径
+    rag_api_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../rag-api-local'))
+    if rag_api_path not in sys.path:
+        sys.path.insert(0, rag_api_path)
+    # 使用 importlib 动态导入
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("model_manager", os.path.join(rag_api_path, "app/services/model_manager.py"))
+    model_manager_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(model_manager_module)
+    ModelManager = model_manager_module.ModelManager
+except Exception:
+    ModelManager = None
 
 logger = logging.getLogger(__name__)
 
@@ -383,30 +400,66 @@ class AdvancedFeature(BaseFeatureExtractor):
     # ========== 新增句向量支持方法骨架 ==========
     
     def get_sentence_embedding(self, sentences: List[str]) -> np.ndarray:
-        """获取批量句向量特征（仅训练时使用）"""
-        if not hasattr(self, 'sentence_model'):
-            try:
-                from sentence_transformers import SentenceTransformer
-                self.sentence_model = SentenceTransformer('shibing624/text2vec-base-chinese')
-                logger.info("句向量模型加载成功")
-            except ImportError:
-                logger.warning("sentence-transformers未安装，使用零向量代替")
-                return np.zeros((len(sentences), 768))
-            except Exception as e:
-                logger.error(f"句向量模型加载失败: {e}")
-                return np.zeros((len(sentences), 768))
-        
+        """获取批量句向量特征（优先使用预加载模型）"""
         # 处理空列表
         if len(sentences) == 0:
             return np.zeros((0, 768))
         
+        # 获取模型（预加载优先，懒加载兜底）
+        model = self._get_model()
+        if model is None:
+            return np.zeros((len(sentences), 768))
+        
+        # 统一提取句向量
+        return self._extract_embeddings(model, sentences)
+    
+    def _get_model(self):
+        """统一获取 SentenceTransformer 模型"""
+        # 1. 尝试预加载模型
+        try:
+            if ModelManager is not None:
+                model_manager = ModelManager()
+                preloaded_model = model_manager.get_sentence_transformer()
+                if preloaded_model is not None:
+                    logger.info("使用预加载的 SentenceTransformer 模型")
+                    return preloaded_model
+        except Exception as e:
+            logger.warning(f"使用预加载模型失败: {e}，回退到懒加载模式")
+        
+        # 2. 回退到懒加载模型
+        if hasattr(self, 'sentence_model'):
+            return self.sentence_model
+        
+        try:
+            # 设置环境变量
+            os.environ['HF_ENDPOINT'] = 'https://dl.aifasthub.com'
+            os.environ['HF_HUB_OFFLINE'] = '0'
+            logger.info("懒加载模式，使用中国镜像站点: https://dl.aifasthub.com")
+            
+            # 加载模型
+            enhanced_config = self.advanced_config.get('enhanced', {})
+            sentence_model = enhanced_config.get('sentence_model', 'shibing624/text2vec-base-chinese')
+            
+            self.sentence_model = SentenceTransformer(sentence_model)
+            logger.info("懒加载模式：句向量模型加载成功")
+            return self.sentence_model
+            
+        except ImportError:
+            logger.warning("sentence-transformers未安装，使用零向量代替")
+            return None
+        except Exception as e:
+            logger.error(f"懒加载模式：句向量模型加载失败: {e}")
+            return None
+    
+    def _extract_embeddings(self, model, sentences: List[str]) -> np.ndarray:
+        """使用指定模型提取句向量"""
         try:
             logger.info(f"开始提取批量句向量特征，样本数: {len(sentences)}")
-            embeddings = self.sentence_model.encode(sentences, batch_size=64, show_progress_bar=True)
-            logger.info(f"批量句向量提取成功，维度: {embeddings.shape}")
-            return embeddings  # 返回(N, 768)矩阵
+            embeddings = model.encode(sentences, batch_size=64, show_progress_bar=True)
+            logger.info(f"句向量提取成功，维度: {embeddings.shape}")
+            return embeddings
         except Exception as e:
-            logger.error(f"批量句向量提取失败: {e}")
+            logger.error(f"句向量提取失败: {e}")
             return np.zeros((len(sentences), 768))
     
     def get_enhanced_intent_features(self, sentence: str) -> np.ndarray:
@@ -428,7 +481,7 @@ class AdvancedFeature(BaseFeatureExtractor):
             logger.info(f"原有特征维度: {original_features.shape}")
             
             # 2. 句向量特征
-            sentence_embedding = self.get_sentence_embedding(sentence)
+            sentence_embedding = self.get_sentence_embedding([sentence])
             logger.info(f"句向量维度: {sentence_embedding.shape}")
             
             # 3. 从ad_feature_weights读取句向量权重

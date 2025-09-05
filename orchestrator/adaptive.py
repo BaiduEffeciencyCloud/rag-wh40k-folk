@@ -7,26 +7,29 @@ import logging
 import numpy as np
 import random
 import json
+import joblib
 import os
 import yaml
 from typing import Dict, List, Any, Union
-from ..qProcessor.data_models import IntentResult, COTStep
+from orchestrator.data_models import IntentResult
 from intent_training.model.intent_classifier import IntentClassifier
 from intent_training.model.uncertainty_detector import UncertaintyDetector
 from intent_training.predictor import IntentPredictor
 from vocab_mgr.vocab_loader import VocabLoad
 from intent_training.feature.pa_feature import EnhancedFeatureExtractor
+from engineconfig.qp_config import NON_WH40K_RESPONSES
+from intent_training.feature.factory import FeatureExtractorFactory
+from intent_training.feature.ad_feature import AdvancedFeature
 
 from engineconfig.qp_config import (
     INTENT_CLASSIFIER_CONFIG,
     UNCERTAINTY_CONFIG,
-    INTENT_TYPES,
-    NON_WH40K_RESPONSES
+    INTENT_TYPES
 )
 
 logger = logging.getLogger(__name__)
 
-class IntentAnalyzer:
+class AdaptiveProcessor:
     """自适应查询处理器"""
     
     def __init__(self, intent_classifier_path: str = None, uncertainty_config: Dict = None):
@@ -57,20 +60,10 @@ class IntentAnalyzer:
                 "pipeline_config": Dict,          # 检索管道配置
                 "intent_result": IntentResult,    # 意图识别结果
                 "uncertainty_result": Dict,       # 不确定性检测结果
-                "cot_steps": List[COTStep]        # COT处理步骤
             }
         """
         # 1. 意图识别
         intent_result = self._classify_intent(query)
-        
-        # 2. 处理非战锤相关问题
-        if intent_result.intent_type == 'unknown':
-            return {
-                'processed_queries': [],
-                'pipeline_config': None,
-                'intent_result': intent_result,
-                'fixed_response': self._get_wh40k_response()
-            }
         
         return {
             'intent_result': intent_result,
@@ -96,7 +89,7 @@ class IntentAnalyzer:
     
     def _load_feature_extractor(self):
         """加载特征提取器，根据配置使用正确的特征提取器类型"""
-        import joblib
+
 
         # 1. 读取配置文件，确定特征提取器类型
         config_path = INTENT_CLASSIFIER_CONFIG.get('config_path', "intent_training/config.yaml")
@@ -151,8 +144,7 @@ class IntentAnalyzer:
         elif feature_type == 'advanced':
             # 使用高级特征提取器
             try:
-                from intent_training.feature.factory import FeatureExtractorFactory
-                from intent_training.feature.ad_feature import AdvancedFeature
+
 
                 ad_extractor = AdvancedFeature(config)
 
@@ -204,6 +196,11 @@ class IntentAnalyzer:
     
     def _classify_intent(self, query: str) -> IntentResult:
         """优化的意图识别：先检查WH40K词汇，再进行ML预测"""
+        # 初始化默认值
+        intent_prediction = "query"
+        max_confidence = 0.5
+        intent_probabilities = np.array([0.2] * 5)
+        
         # 1. 快速检查：是否包含WH40K相关词汇
         if not self._contains_wh40k_vocab(query):
             # 非WH40K查询，节省资源，直接返回unknown
@@ -299,101 +296,7 @@ class IntentAnalyzer:
         features = np.zeros(1000)  # 固定1000维
         for i, char in enumerate(query[:1000]):
             features[i] = ord(char) % 1000
-        return features.reshape(1, -1)  # 确保是2D数组
-    
-    def _extract_entities(self, query: str, intent_type: str = None) -> List[str]:
-        """根据意图类型提取查询中的实体"""
-        entities = []
-        wh40k_terms = self._load_wh40k_vocab()
-        
-        if intent_type == 'compare':
-            # 比较类：根据比较模式识别实体
-            compare_pattern = self.cot_processor._detect_compare_pattern(query)
-            
-            if compare_pattern == 'direct_comparison':
-                # 直接比较：识别两个实体
-                entities = self._extract_direct_cmp_entities(query, wh40k_terms)
-            else:
-                # 范围比较：识别一个主体
-                entities = self._extract_range_cmp_entities(query, wh40k_terms)
-        else:
-            # Query/Rule/List：识别一个主体
-            for term in wh40k_terms:
-                if term in query:
-                    entities.append(term)
-                    break  # 只取第一个匹配的
-        
-        return entities
-    
-    def _extract_direct_cmp_entities(self, query: str, wh40k_terms: List[str]) -> List[str]:
-        """提取直接比较的两个实体"""
-        entities = []
-        
-        # 优先处理"和"比较模式
-        if '和' in query:
-            parts = query.split('和')
-            if len(parts) >= 2:
-                # 提取两个部分中的所有战锤实体
-                for part in parts[:2]:  # 只取前两个部分
-                    for term in wh40k_terms:
-                        if term in part and term not in entities:
-                            entities.append(term)
-        # 然后处理"哪个...更"模式
-        elif '哪个' in query and '更' in query:
-            # 提取"哪个"和"更"之间的实体
-            which_index = query.find('哪个')
-            more_index = query.find('更')
-            
-            if which_index < more_index:
-                # 提取"哪个"和"更"之间的内容作为比较对象
-                between_text = query[which_index + 2:more_index].strip()
-                # 在战锤词汇中查找匹配的实体
-                for term in wh40k_terms:
-                    if term in between_text:
-                        entities.append(term)
-        
-        return entities
-    
-    def _extract_range_cmp_entities(self, query: str, wh40k_terms: List[str]) -> List[str]:
-        """提取范围比较的主体"""
-        entities = []
-        
-        # 检查是否是"哪个...最"模式
-        if '哪个' in query and '最' in query:
-            # 提取"哪个"和"最"之间的实体
-            which_index = query.find('哪个')
-            most_index = query.find('最')
-            
-            if which_index < most_index:
-                between_text = query[which_index + 2:most_index].strip()
-                for term in wh40k_terms:
-                    if term in between_text:
-                        entities.append(term)
-                        break
-        else:
-            # 其他范围比较模式，识别一个主体
-            for term in wh40k_terms:
-                if term in query:
-                    entities.append(term)
-                    break
-        
-        return entities
-    
-    def _extract_relations(self, query: str) -> List[str]:
-        """提取查询中的关系"""
-        # 简单的关系提取
-        relations = []
-        # 这里可以添加关系提取逻辑
-        return relations
-    
-    def _calculate_complexity(self, query: str) -> float:
-        """计算查询复杂度"""
-        # 基于查询长度和词汇复杂度计算
-        length_factor = min(len(query) / 50.0, 1.0)  # 长度因子
-        word_count = len(query.split())
-        word_factor = min(word_count / 10.0, 1.0)  # 词汇因子
-        
-        return (length_factor + word_factor) / 2.0
+        return features.reshape(1, -1)  # 确保是2D数组 
     
     def _detect_uncertainty(self, features: np.ndarray, probabilities: np.ndarray) -> Dict[str, Any]:
         """检测不确定性"""
@@ -457,16 +360,7 @@ class IntentAnalyzer:
         """基于规则的意图分类"""
         return self._find_keyword_match(query)
     
-    def _get_wh40k_response(self) -> str:
-        """随机选择战锤40K阵营的回复"""
-        responses = NON_WH40K_RESPONSES.values()
-        return random.choice(list(responses))
 
-    
-    def _generate_pipeline(self, query: str, intent: IntentResult, cot_steps: List[COTStep]) -> Dict[str, Any]:
-        """生成检索管道配置"""
-        return self.pipeline_generator.generate_pipeline(query, intent, cot_steps)
-    
     def _contains_wh40k_vocab(self, query: str) -> bool:
         """检查查询是否包含WH40K相关词汇"""
         # 加载WH40K词汇
@@ -513,4 +407,64 @@ class IntentAnalyzer:
             logger.error(f"加载WH40K词汇失败: {e}")
             return {} 
 
- 
+
+def _parse_process_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """解析processor.process的返回值，转换为可序列化的格式"""
+    try:
+        parsed_result = {}
+        
+        def _convert_value(val):
+            """递归转换值，处理所有numpy类型"""
+            if isinstance(val, np.ndarray):
+                return val.tolist()
+            elif isinstance(val, (np.bool_, np.integer, np.floating)):
+                # 处理numpy标量类型
+                return val.item()
+            elif isinstance(val, dict):
+                return {k: _convert_value(v) for k, v in val.items()}
+            elif isinstance(val, list):
+                return [_convert_value(item) for item in val]
+            elif hasattr(val, '__dict__') and not isinstance(val, (str, int, float, bool)):
+                # 处理复杂对象
+                return str(val)
+            else:
+                return val
+        
+        for key, value in result.items():
+            parsed_result[key] = _convert_value(value)
+        
+        return parsed_result
+    except Exception as e:
+        logger.error(f"解析结果失败: {e}")
+        return {"error": f"解析失败: {str(e)}", "raw_result": str(result)}
+
+
+def main():
+    """调试意图识别的主函数"""
+    import sys
+    
+    if len(sys.argv) != 2:
+        print("用法: python adaptive.py '查询内容'")
+        sys.exit(1)
+    
+    query = sys.argv[1]
+    
+    # 创建AdaptiveProcessor实例
+    processor = AdaptiveProcessor()
+    
+    try:
+        # 调用process方法
+        result = processor.process(query)
+        
+        # 解析结果
+        parsed_result = _parse_process_result(result)
+        print(json.dumps(parsed_result, indent=2, ensure_ascii=False))
+        
+    except Exception as e:
+        print(f"错误: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    main()

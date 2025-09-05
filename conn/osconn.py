@@ -16,7 +16,9 @@ from typing import List, Dict
 import dashscope
 from http import HTTPStatus
 from config import DEBUG_ANALYZE, OPENSEARCH_SEARCH_ANALYZER
+import config
 import json
+from storage.storage_factory import StorageFactory
 # Opensearch数据库的处理类,负责数据转化,数据上传,数据搜索
 class OpenSearchConnection(ConnectionInterface):
     def _clean_term(self, term: str) -> str:
@@ -212,40 +214,96 @@ class OpenSearchConnection(ConnectionInterface):
             SimpleNamespace: 配置参数对象，结构与JSON文件一致
         """
         try:
+            # 根据CLOUD_STORAGE配置选择加载方式
+            if config.CLOUD_STORAGE:
+                self.logger.info(f"使用云端存储加载intent配置: {intent}")
+                return self._load_intent_config_from_cloud(intent)
+            else:
+                self.logger.info(f"使用本地存储加载intent配置: {intent}")
+                return self._load_intent_config_from_local(intent)
+        except Exception as e:
+            self.logger.error(f"加载intent配置失败: {intent}, 错误: {str(e)}")
+            raise
+    
+    def _dict_to_namespace(self, d, key_name=None) -> SimpleNamespace:
+        """递归转换dict为SimpleNamespace，但保留需要调用.items()的字典为字典格式"""
+        preserve_dict_keys = {'HEADING_WEIGHTS', 'SEARCH_FIELD_WEIGHTS', 'BOOST_WEIGHTS', 'QUERY_LENGTH_THRESHOLDS', 'MATCH_PHRASE_CONFIG'}
+        
+        if isinstance(d, dict):
+            # 如果当前字典的key_name在preserve_dict_keys中，保持为字典
+            if key_name in preserve_dict_keys:
+                return d
+            else:
+                return SimpleNamespace(**{k: self._dict_to_namespace(v, k) for k, v in d.items()})
+        elif isinstance(d, list):
+            return [self._dict_to_namespace(item) for item in d]
+        else:
+            return d
+    
+    def _parse_config_data(self, config_data: dict, intent: str, source: str) -> SimpleNamespace:
+        """解析配置数据并转换为SimpleNamespace"""
+        try:
+            config_obj = self._dict_to_namespace(config_data)
+            self.logger.info(f"成功从{source}加载intent配置: {intent}")
+            return config_obj
+        except Exception as e:
+            self.logger.error(f"从{source}解析intent配置失败: {intent}, 错误: {str(e)}")
+            raise
+    
+    def _load_intent_config_from_local(self, intent: str) -> SimpleNamespace:
+        """从本地文件系统加载intent配置"""
+        try:
             # 构造配置文件路径
             config_file = os.path.join(os.path.dirname(__file__), 'params', f'{intent}.json')
             
             # 检查文件是否存在
             if not os.path.exists(config_file):
-                raise FileNotFoundError(f"Intent配置文件不存在: {config_file}")
+                raise FileNotFoundError(f"本地Intent配置文件不存在: {config_file}")
             
             # 读取并解析JSON文件
             with open(config_file, 'r', encoding='utf-8') as f:
                 config_data = json.load(f)
             
-            # 递归转换dict为SimpleNamespace，但保留需要调用.items()的字典为字典格式
-            def dict_to_namespace(d, key_name=None):
-                preserve_dict_keys = {'HEADING_WEIGHTS', 'SEARCH_FIELD_WEIGHTS', 'BOOST_WEIGHTS', 'QUERY_LENGTH_THRESHOLDS', 'MATCH_PHRASE_CONFIG'}
-                
-                if isinstance(d, dict):
-                    # 如果当前字典的key_name在preserve_dict_keys中，保持为字典
-                    if key_name in preserve_dict_keys:
-                        return d
-                    else:
-                        return SimpleNamespace(**{k: dict_to_namespace(v, k) for k, v in d.items()})
-                elif isinstance(d, list):
-                    return [dict_to_namespace(item) for item in d]
-                else:
-                    return d
-            
-            config_obj = dict_to_namespace(config_data)
-            
-            self.logger.info(f"成功加载intent配置: {intent}")
-            return config_obj
+            return self._parse_config_data(config_data, intent, "本地")
             
         except Exception as e:
-            self.logger.error(f"加载intent配置失败: {intent}, 错误: {str(e)}")
+            self.logger.error(f"从本地加载intent配置失败: {intent}, 错误: {str(e)}")
             raise
+    
+    def _load_intent_config_from_cloud(self, intent: str) -> SimpleNamespace:
+        """从云端OSS加载intent配置"""
+        try:
+            # 创建OSS存储实例
+            storage = StorageFactory.create_storage(
+                access_key_id=config.OSS_ACCESS_KEY,
+                access_key_secret=config.OSS_ACCESS_KEY_SECRET,
+                endpoint=config.OSS_ENDPOINT,
+                bucket_name=config.OSS_BUCKET_NAME_PARAMS,  # 使用参数Bucket
+                region=config.OSS_REGION
+            )
+            
+            # 构建OSS路径: search/{intent}.json
+            oss_path = f"search/{intent}.json"
+            
+            # 检查文件是否存在
+            if not storage.exists(oss_path):
+                raise FileNotFoundError(f"云端intent配置文件不存在: {oss_path}")
+            
+            # 从OSS下载文件内容
+            content = storage.load(oss_path)
+            if content is None:
+                raise Exception(f"从云端下载intent配置失败: {oss_path}")
+            
+            # 解析JSON内容
+            config_data = json.loads(content.decode('utf-8'))
+            
+            return self._parse_config_data(config_data, intent, "云端")
+            
+        except Exception as e:
+            self.logger.error(f"从云端加载intent配置失败: {intent}, 错误: {str(e)}")
+            # 如果云端加载失败，尝试本地加载作为fallback
+            self.logger.info(f"云端加载失败，尝试本地加载: {intent}")
+            return self._load_intent_config_from_local(intent)
 
     def hybrid_search(self, query: str, intent: str, filter: dict = None, top_k: int = 20, rerank: bool = False, **kwargs) -> dict:
         """

@@ -33,14 +33,3 @@ class COTStep:
     dependencies: List[int]         # 依赖的步骤ID列表
     confidence: float               # 该步骤的置信度 (0-1)
     metadata: Dict[str, Any]       # 额外元数据
-
-
-@dataclass
-class PipelineConfig:
-    """检索管道配置数据类"""
-    intent_type: str                # 意图类型
-    search_strategy: str            # 检索策略 ("dense", "sparse", "hybrid")
-    engine_config: Dict[str, Any]  # 引擎配置
-    post_processors: List[str]      # 后处理器列表
-    fusion_strategy: str            # 结果融合策略
-    parameters: Dict[str, Any]     # 其他参数 

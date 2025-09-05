@@ -1,7 +1,7 @@
 {
   "HYBRID_CONF": {
     "QWEN_DIMENSION": 2048,
-    "HYBRID_ALPHA": 0.4,
+    "HYBRID_ALPHA": 0.3,
     "HYBRID_ALGORITHM": "rrf",
     "PIPELINE_BM25_BOOST": 1.5,
     "PIPELINE_VECTOR_BOOST": 1.0,
@@ -13,9 +13,9 @@
   "RRF_CONF": {
     "RRF_SPARSE_TERMS_BOOST": 1.5,
     "RRF_DEFAULT_RANK_CONSTANT": 20,
-    "RRF_SPARSE_WEIGHT": 0.8,
-    "RRF_DENSE_WEIGHT": 1.2,
-    "RRF_WINDOW_MULTIPLIER": 3,
+    "RRF_SPARSE_WEIGHT": 1.2,
+    "RRF_DENSE_WEIGHT": 0.8,
+    "RRF_WINDOW_MULTIPLIER": 4,
     "RRF_MAX_WINDOW_SIZE": 300
   },
   "QUERY_WEIGHT": {
@@ -36,8 +36,8 @@
       "min_score": 0.1,
       "query_text_min_length": 2,
       "sparse_vector_min_terms": 3,
-      "match_phrase_weight": 2.0,
-      "terms_weight": 1.0,
+      "match_phrase_weight": 1.8,
+      "terms_weight": 1.2,
       "fuzzy_filters": [
         {"min_term_freq": 0.01},
         {"max_doc_freq": 0.5}
@@ -51,8 +51,8 @@
     },
     "HEADING_WEIGHTS": {
       "h1": 1.0,
-      "h2": 1.5,
-      "h3": 1.6,
+      "h2": 1.7,
+      "h3": 1.7,
       "h4": 0.6,
       "h5": 0.5,
       "h6": 0.4
@@ -61,12 +61,12 @@
       "section_heading": 1.0,
       "sub_section": 1.2,
       "content_type": 1.0,
-      "chunk_type": 1.4,
+      "chunk_type": 1.6,
       "faction": 1.3
     }
   },
   "RERANK": {
     "ALIYUN_RERANK_MODEL": "gte-rerank-v2",
-    "RERANK_TOPK": 25
+    "RERANK_TOPK": 30
   }
 }

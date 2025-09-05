@@ -1,12 +1,14 @@
 import os
-import jieba
+import sys
 import json
 import pickle
 import glob
 import logging
+import subprocess
+from collections import Counter
+import jieba
 from rank_bm25 import BM25Okapi
-from typing import Dict, List, Any, Optional
-from datetime import datetime
+from dataupload.wh40k_weight_enhancer import WH40KWeightEnhancer
 from config import PINECONE_MAX_SPARSE_VALUES
 
 logger = logging.getLogger(__name__)
@@ -27,7 +29,6 @@ class BM25Manager:
         
         # 初始化权重增强器（如果启用）
         if enable_wh40k_enhancement:
-            from dataupload.wh40k_weight_enhancer import WH40KWeightEnhancer
             self.weight_enhancer = WH40KWeightEnhancer()
         
         if custom_dict_path and os.path.exists(custom_dict_path):
@@ -51,7 +52,6 @@ class BM25Manager:
         return list(jieba.cut(text))
 
     def _build_vocabulary(self, corpus_texts):
-        from collections import Counter
         all_tokens = []
         for text in corpus_texts:
             all_tokens.extend(self.tokenize_chinese(text))
@@ -275,7 +275,6 @@ class BM25Manager:
                 'missing_tokens': []
             }
         
-        import jieba
         all_tokens = []
         for text in texts:
             tokens = list(jieba.cut(text))
@@ -316,38 +315,4 @@ class BM25Manager:
             'min_frequency': min(frequencies)
         }
     
-    def generate_dictionary(self, min_freq=None, max_vocab_size=None, input_dir=None) -> str:
-        """生成词典文件 - 调用gen_userdict.py"""
-        import subprocess
-        import sys
-        
-        # 构建命令参数
-        cmd = [sys.executable, '-m', 'dataupload.gen_userdict']
-        
-        if min_freq is not None:
-            cmd.extend(['--min-freq', str(min_freq)])
-        if max_vocab_size is not None:
-            cmd.extend(['--max-vocab-size', str(max_vocab_size)])
-        if input_dir is not None:
-            cmd.extend(['--input-dir', input_dir])
-        
-        try:
-            logger.info(f"执行词典生成命令: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            logger.info("词典生成成功")
-            
-            # 返回生成的词典文件路径
-            dict_file = self.get_latest_dict_file()
-            if dict_file:
-                logger.info(f"生成的词典文件: {dict_file}")
-                return dict_file
-            else:
-                raise Exception("无法找到生成的词典文件")
-                
-        except subprocess.CalledProcessError as e:
-            logger.error(f"词典生成失败: {e}")
-            logger.error(f"错误输出: {e.stderr}")
-            raise Exception(f"词典生成失败: {e.stderr}")
-        except Exception as e:
-            logger.error(f"词典生成异常: {e}")
-            raise Exception(f"词典生成异常: {e}") 
+    # generate_dictionary 函数已移除（未在业务逻辑中使用）

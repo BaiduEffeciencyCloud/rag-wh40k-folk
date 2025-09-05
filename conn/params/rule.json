@@ -1,9 +1,9 @@
 {
   "HYBRID_CONF": {
     "QWEN_DIMENSION": 2048,
-    "HYBRID_ALPHA": 0.5,
+    "HYBRID_ALPHA": 0.3,
     "HYBRID_ALGORITHM": "pipeline",
-    "PIPELINE_BM25_BOOST": 1.5,
+    "PIPELINE_BM25_BOOST": 1.6,
     "PIPELINE_VECTOR_BOOST": 1.0,
     "PIPELINE_NORMALIZATION_TECHNIQUE": "min_max",
     "PIPELINE_COMBINATION_TECHNIQUE": "arithmetic_mean",
@@ -13,8 +13,8 @@
   "RRF_CONF": {
     "RRF_SPARSE_TERMS_BOOST": 1.5,
     "RRF_DEFAULT_RANK_CONSTANT": 20,
-    "RRF_SPARSE_WEIGHT": 0.8,
-    "RRF_DENSE_WEIGHT": 1.2,
+    "RRF_SPARSE_WEIGHT": 1.2,
+    "RRF_DENSE_WEIGHT": 0.8,
     "RRF_WINDOW_MULTIPLIER": 3,
     "RRF_MAX_WINDOW_SIZE": 300
   },
@@ -32,11 +32,11 @@
       "fuzziness": "AUTO",
       "operator": "or",
       "max_expansions": 50,
-      "prefix_length": 0,
+      "prefix_length": 1,
       "min_score": 0.1,
-      "query_text_min_length": 2,
+      "query_text_min_length": 3,
       "sparse_vector_min_terms": 3,
-      "match_phrase_weight": 2.0,
+      "match_phrase_weight": 2.8,
       "terms_weight": 1.0,
       "fuzzy_filters": [
         {"min_term_freq": 0.01},
@@ -61,7 +61,7 @@
       "section_heading": 1.0,
       "sub_section": 1.2,
       "content_type": 1.0,
-      "chunk_type": 1.4,
+      "chunk_type": 1.7,
       "faction": 1.3
     }
   },

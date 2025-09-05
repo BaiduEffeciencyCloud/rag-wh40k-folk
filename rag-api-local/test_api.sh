@@ -79,10 +79,17 @@ EOF
 echo -e "${BLUE}发送请求...${NC}"
 echo ""
 
+# 记录开始时间
+START_TIME=$(date +%s.%N)
+
 RESPONSE=$(curl -s -X POST \
     -H "Content-Type: application/json" \
     -d "$REQUEST_DATA" \
     "$API_BASE_URL$ENDPOINT")
+
+# 记录结束时间并计算耗时
+END_TIME=$(date +%s.%N)
+DURATION=$(echo "scale=2; $END_TIME - $START_TIME" | bc -l)
 
 # 检查 curl 是否成功
 if [ $? -ne 0 ]; then
@@ -99,6 +106,7 @@ fi
 
 # 格式化输出响应
 echo -e "${GREEN}=== 响应结果 ===${NC}"
+echo -e "${YELLOW}请求耗时:${NC} ${DURATION} 秒"
 echo ""
 
 # 尝试格式化 JSON 输出

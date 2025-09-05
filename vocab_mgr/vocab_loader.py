@@ -9,6 +9,7 @@ import json
 import logging
 from typing import Dict, Any, List
 from config import VOCAB_EXPORT_DIR
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -193,33 +194,85 @@ class VocabLoad:
             return False
 
     def _load_all_vocabulary(self) -> Dict[str, Any]:
-        """加载所有词典分类"""
-        vocabulary = {}
-        
-        try:
-            if not os.path.exists(self.vocab_path):
-                logger.warning(f"词典路径不存在: {self.vocab_path}")
+        """加载所有词典分类（支持云端和本地）"""
+        # 根据配置决定加载方式
+        if config.CLOUD_STORAGE:
+            vocabulary = self._load_all_vocabulary_from_cloud()
+            if vocabulary:
                 return vocabulary
+            logger.warning("云端加载失败，回退到本地加载")
+        
+        return self._load_all_vocabulary_from_local()
+    
+    def _load_all_vocabulary_from_cloud(self) -> Dict[str, Any]:
+        """从云端OSS加载所有词典分类"""
+        try:
+            from storage.oss_storage import OSSStorage
             
-            # 遍历词典目录下的所有JSON文件，排除combined.json
+            # 创建OSS存储实例
+            oss_storage = OSSStorage(
+                access_key_id=config.OSS_ACCESS_KEY,
+                access_key_secret=config.OSS_ACCESS_KEY_SECRET,
+                endpoint=config.OSS_ENDPOINT,
+                bucket_name=config.OSS_BUCKET_NAME_DICT,
+                region=config.OSS_REGION
+            )
+            
+            # 从OSS加载词典文件
+            vocabulary = {}
+            
+            # 使用ObjectIterator动态列举vocabulary/目录下的所有.json文件
+            import oss2
+            auth = oss2.Auth(config.OSS_ACCESS_KEY, config.OSS_ACCESS_KEY_SECRET)
+            bucket = oss2.Bucket(auth, config.OSS_ENDPOINT, config.OSS_BUCKET_NAME_DICT)
+            
+            prefix = 'vocabulary/'
+            for obj in oss2.ObjectIterator(bucket, prefix=prefix):
+                if obj.key.endswith('.json'):
+                    # 提取文件名（去掉vocabulary/前缀）
+                    filename = obj.key.replace(prefix, '')
+                    data = oss_storage.load(obj.key)
+                    if data:
+                        category = filename.replace('.json', '')
+                        vocabulary[category] = json.loads(data.decode('utf-8'))
+                        logger.info(f"成功加载词典文件: {obj.key}")
+            
+            logger.info(f"从云端成功加载词典，包含 {len(vocabulary)} 个分类")
+            return vocabulary
+            
+        except Exception as e:
+            logger.error(f"从云端加载词典失败: {e}")
+            return {}
+    
+    def _load_all_vocabulary_from_local(self) -> Dict[str, Any]:
+        """从本地加载所有词典分类"""
+        try:
+            vocabulary = {}
+            
+            # 检查词典目录是否存在
+            if not os.path.exists(self.vocab_path):
+                logger.warning(f"词典目录不存在: {self.vocab_path}")
+                return {}
+            
+            # 遍历词典目录中的所有JSON文件
             for filename in os.listdir(self.vocab_path):
-                if filename.endswith('.json') and filename != 'combined.json':
+                if filename.endswith('.json'):
                     file_path = os.path.join(self.vocab_path, filename)
                     try:
                         with open(file_path, 'r', encoding='utf-8') as f:
                             category = filename.replace('.json', '')
                             vocabulary[category] = json.load(f)
-                    except (json.JSONDecodeError, IOError) as e:
-                        logger.error(f"加载词典文件失败 {filename}: {e}")
+                        logger.debug(f"成功加载本地词典文件: {filename}")
+                    except Exception as e:
+                        logger.error(f"加载本地词典文件失败 {filename}: {e}")
                         continue
             
-            logger.debug(f"成功加载 {len(vocabulary)} 个词典分类")
+            logger.info(f"从本地成功加载词典，包含 {len(vocabulary)} 个分类")
+            return vocabulary
             
         except Exception as e:
-            logger.error(f"加载词典失败: {e}")
-            vocabulary = {}
-        
-        return vocabulary
+            logger.error(f"从本地加载词典失败: {e}")
+            return {}
 
     def export_for_opensearch(self, output_dir: str = None) -> Dict[str, Any]:
         """导出OpenSearch分析器格式文件"""

@@ -10,6 +10,8 @@ import jieba
 from rank_bm25 import BM25Okapi
 from dataupload.wh40k_weight_enhancer import WH40KWeightEnhancer
 from config import PINECONE_MAX_SPARSE_VALUES
+import config as project_config
+from storage.oss_storage import OSSStorage
 
 logger = logging.getLogger(__name__)
 
@@ -34,18 +36,20 @@ class BM25Manager:
         if custom_dict_path and os.path.exists(custom_dict_path):
             jieba.load_userdict(custom_dict_path)
         if user_dict_path and os.path.exists(user_dict_path):
-            print(f"[DEBUG] 加载保护性userdict: {user_dict_path}")
-            with open(user_dict_path, 'r', encoding='utf-8') as f:
-                print("[DEBUG] userdict内容预览:")
-                for i, line in enumerate(f):
-                    print(line.strip())
-                    # 解析白名单短语，支持格式：短语 频率 词性
-                    phrase = line.strip().split()[0] if line.strip() else None
-                    if phrase:
-                        self.whitelist_phrases.add(phrase)
-                    if i >= 19:
-                        print("... (仅显示前20行)")
-                        break
+            logger.info(f"加载保护性userdict: {user_dict_path}")
+            try:
+                with open(user_dict_path, 'r', encoding='utf-8') as f:
+                    preview_count = 0
+                    for i, line in enumerate(f):
+                        phrase = line.strip().split()[0] if line.strip() else None
+                        if phrase:
+                            self.whitelist_phrases.add(phrase)
+                            preview_count += 1
+                        if i >= 99:
+                            break
+                logger.info(f"userdict 预解析短语数（最多预览100行）：{preview_count}")
+            except Exception as e:
+                logger.warning(f"userdict 预解析失败（不影响加载）：{e}")
             jieba.load_userdict(user_dict_path)
 
     def tokenize_chinese(self, text):
@@ -158,15 +162,161 @@ class BM25Manager:
             pickle.dump(self.bm25_model, f)
         with open(vocab_path, 'w', encoding='utf-8') as f:
             json.dump(self.vocabulary, f, ensure_ascii=False)
+        # 云端上传（仅模型），按已确认决策：失败即中断（raise）
+        try:
+            if getattr(project_config, 'CLOUD_STORAGE', False):
+                oss = OSSStorage(
+                    access_key_id=project_config.OSS_ACCESS_KEY,
+                    access_key_secret=project_config.OSS_ACCESS_KEY_SECRET,
+                    endpoint=project_config.OSS_ENDPOINT,
+                    bucket_name=project_config.OSS_BUCKET_NAME_MODELS,
+                    region=project_config.OSS_REGION,
+                )
+                key = os.path.basename(model_path)
+                with open(model_path, 'rb') as mf:
+                    data = mf.read()
+                ok = oss.storage(data=data, oss_path=key)
+                uri = f"oss://{project_config.OSS_BUCKET_NAME_MODELS}/{key}"
+                logger.info(f"[OSS] upload model: bucket={project_config.OSS_BUCKET_NAME_MODELS}, key={key}, uri={uri}, bytes={len(data)}, ok={ok}")
+                if not ok:
+                    raise Exception(f"模型上传失败: {uri}")
+        except Exception as e:
+            # 决策 4C：失败即中断
+            logger.error(f"[OSS] upload model failed: {e}")
+            raise
 
     def load_model(self, model_path, vocab_path):
-        with open(model_path, 'rb') as f:
-            self.bm25_model = pickle.load(f)
-        with open(vocab_path, 'r', encoding='utf-8') as f:
-            self.vocabulary = json.load(f)
+        model_loaded = False
+        vocab_loaded = False
+        # 若内存中已存在词典，则视为已加载，避免重复从云/本地读取
+        if isinstance(self.vocabulary, dict) and self.vocabulary:
+            vocab_loaded = True
+            logger.info("[PRESET] in-memory vocabulary detected, skip external vocab loading")
+        # 云端优先
+        try:
+            if getattr(project_config, 'CLOUD_STORAGE', False):
+                # 读取模型
+                try:
+                    oss_models = OSSStorage(
+                        access_key_id=project_config.OSS_ACCESS_KEY,
+                        access_key_secret=project_config.OSS_ACCESS_KEY_SECRET,
+                        endpoint=project_config.OSS_ENDPOINT,
+                        bucket_name=getattr(project_config, 'OSS_BUCKET_NAME_MODELS', None),
+                        region=getattr(project_config, 'OSS_REGION', None),
+                    )
+                    model_key = os.path.basename(model_path)
+                    model_bytes = oss_models.get_object_bytes(model_key)
+                    if model_bytes:
+                        self.bm25_model = pickle.loads(model_bytes)
+                        # 类型/属性校验
+                        if not hasattr(self.bm25_model, 'idf') or not hasattr(self.bm25_model, 'k1') or not hasattr(self.bm25_model, 'b'):
+                            raise RuntimeError('云端模型对象校验失败')
+                        model_loaded = True
+                        logger.info(f"从 OSS 读取模型成功: bucket={getattr(project_config,'OSS_BUCKET_NAME_MODELS', None)}, key={model_key}, bytes={len(model_bytes)}")
+                except Exception as e:
+                    logger.warning(f"[OSS] load model fallback local: {e}")
+
+                # 读取词典（若内存未预载）
+                if not vocab_loaded:
+                    try:
+                        oss_dicts = OSSStorage(
+                            access_key_id=project_config.OSS_ACCESS_KEY,
+                            access_key_secret=project_config.OSS_ACCESS_KEY_SECRET,
+                            endpoint=project_config.OSS_ENDPOINT,
+                            bucket_name=getattr(project_config, 'OSS_BUCKET_NAME_DICT', None),
+                            region=getattr(project_config, 'OSS_REGION', None),
+                        )
+                        vocab_key = os.path.basename(vocab_path)
+                        vocab_bytes = oss_dicts.get_object_bytes(vocab_key)
+                        if vocab_bytes:
+                            self.vocabulary = json.loads(vocab_bytes.decode('utf-8'))
+                            if not isinstance(self.vocabulary, dict):
+                                raise RuntimeError('云端词典数据不是dict')
+                            vocab_loaded = True
+                            logger.info(f"[OSS] load vocab: bucket={getattr(project_config,'OSS_BUCKET_NAME_DICT', None)}, key={vocab_key}, bytes={len(vocab_bytes)}, used=cloud, ok=True")
+                    except Exception as e:
+                        logger.warning(f"[OSS] load vocab fallback local: {e}")
+        except Exception as e:
+            # 总体云端初始化异常，走本地回退
+            logger.warning(f"[OSS] init/load error, fallback to local: {e}")
+
+        # 本地回退（对未成功的部分分别回退）
+        try:
+            if not model_loaded:
+                with open(model_path, 'rb') as f:
+                    self.bm25_model = pickle.load(f)
+                if not hasattr(self.bm25_model, 'idf') or not hasattr(self.bm25_model, 'k1') or not hasattr(self.bm25_model, 'b'):
+                    raise RuntimeError('本地模型对象校验失败')
+                logger.info(f"[LOCAL] load model: path={model_path}, used=local, ok=True")
+                model_loaded = True
+            if not vocab_loaded:
+                with open(vocab_path, 'r', encoding='utf-8') as f:
+                    self.vocabulary = json.load(f)
+                if not isinstance(self.vocabulary, dict):
+                    raise RuntimeError('本地词典数据不是dict')
+                logger.info(f"[LOCAL] load vocab: path={vocab_path}, used=local, ok=True")
+                vocab_loaded = True
+        except Exception as e:
+            # 任一回退失败，留待统一判定
+            if not model_loaded or not vocab_loaded:
+                logger.error(f"[LOAD] both cloud and local failed: model_ok={model_loaded}, vocab_ok={vocab_loaded}, err={e}")
+                raise RuntimeError(f"load_model failed: model_ok={model_loaded}, vocab_ok={vocab_loaded}")
+
         self.is_fitted = True
 
     # ===== 重构目标：新增方法 =====
+    def load_dictionary_from_bytes(self, data_bytes: bytes) -> dict:
+        """从字节数据加载词典，支持两种格式：
+        1) 词频格式：{"词": {"weight": 数值}, ...}
+        2) 传统格式：{"vocabulary": {...}} 或 直接词典 {...}
+        """
+        try:
+            text = data_bytes.decode('utf-8') if isinstance(data_bytes, (bytes, bytearray)) else str(data_bytes)
+            dict_data = json.loads(text)
+            if isinstance(dict_data, dict):
+                # 词频格式
+                if all(isinstance(v, dict) and 'weight' in v for v in dict_data.values()):
+                    self.vocabulary = {word: data['weight'] for word, data in dict_data.items()}
+                    logger.info("检测到带词频格式词典（bytes）")
+                else:
+                    # 传统格式
+                    if 'vocabulary' in dict_data and isinstance(dict_data['vocabulary'], dict):
+                        self.vocabulary = dict_data['vocabulary']
+                    else:
+                        self.vocabulary = dict_data
+                    logger.info("检测到传统格式词典（bytes）")
+                logger.info(f"成功从bytes加载词典，词汇量: {len(self.vocabulary)}")
+                return dict_data
+            else:
+                raise Exception("解析后的词典数据非dict类型")
+        except Exception as e:
+            raise Exception(f"从bytes加载词典失败: {e}")
+
+    def load_userdict_from_bytes(self, data_bytes: bytes) -> None:
+        """从字节数据加载userdict（白名单短语）。
+        每行一个短语，可能包含频率、词性；仅取首列为短语。
+        同时加载到jieba的用户词典中，以便分词保护。
+        """
+        try:
+            content = data_bytes.decode('utf-8') if isinstance(data_bytes, (bytes, bytearray)) else str(data_bytes)
+            phrases = set()
+            for line in content.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                first = stripped.split()[0]
+                if first:
+                    phrases.add(first)
+            # 记录到实例的白名单集合
+            if not hasattr(self, 'whitelist_phrases'):
+                self.whitelist_phrases = set()
+            self.whitelist_phrases.update(phrases)
+            # 将短语动态加入jieba词典（无频率则使用默认）
+            for p in phrases:
+                jieba.add_word(p)
+            logger.info(f"从bytes加载userdict完成，短语数: {len(phrases)}")
+        except Exception as e:
+            raise Exception(f"从bytes加载userdict失败: {e}")
     
     def get_latest_dict_file(self, dict_dir: str = "dict") -> str:
         """查找dict目录下最新的bm25_vocab_*.json文件（排除带freq的文件）"""

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
-from app.models.query import IntentRequest
-from app.models.response import IntentResponse
-from app.services.rag_service import RAGService
+from ..models.query import IntentRequest
+from ..models.response import IntentResponse
+from ..services.rag_service import RAGService
 from datetime import datetime
 
 router = APIRouter()

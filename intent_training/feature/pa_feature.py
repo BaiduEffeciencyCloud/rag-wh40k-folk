@@ -19,20 +19,8 @@ import jieba
 from .base import BaseFeatureExtractor
 from .complexity import ComplexityCalculator
 from sentence_transformers import SentenceTransformer
+from rag_api.app.services.model_manager import ModelManager  # type: ignore
 
-# 导入 ModelManager 用于预加载模型支持
-try:
-    import sys
-    import os
-    # 添加 rag-api-local 目录到 Python 路径
-    rag_api_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../rag-api-local'))
-    if rag_api_path not in sys.path:
-        sys.path.insert(0, rag_api_path)
-    
-    # 直接导入 ModelManager，保持单例模式
-    from app.services.model_manager import ModelManager  # type: ignore
-except Exception:
-    ModelManager = None
 
 logger = logging.getLogger(__name__)
 

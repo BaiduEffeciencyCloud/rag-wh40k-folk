@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
-from app.models.query import QueryRequest
-from app.models.response import QueryResponse
-from app.services.rag_service import RAGService
+from ..models.query import QueryRequest
+from ..models.response import QueryResponse
+from ..services.rag_service import RAGService
 from datetime import datetime
 import uuid
 

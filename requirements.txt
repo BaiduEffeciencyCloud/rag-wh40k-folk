@@ -37,3 +37,5 @@ seqeval==1.2.2
 psutil==7.0.0
 uvicorn[standard]==0.24.0
 pydantic>=2.0.0,<3.0.0
+evaluate==0.4.0
+bert-score==0.3.13

@@ -214,7 +214,7 @@ class TemplateManager:
             content = storage.load(oss_path)
             if content is None:
                 logger.error(f"从云端下载模板失败: {oss_path}")
-                return self._load_from_local()
+                return self._load_from_local(intent)
             
             # 解析JSON内容
             template = json.loads(content.decode('utf-8'))

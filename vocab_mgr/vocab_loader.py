@@ -5,10 +5,15 @@
 """
 
 import os
+import sys
 import json
 import logging
 from typing import Dict, Any, List
-from config import VOCAB_EXPORT_DIR
+
+# 确保优先导入项目根目录下的 config.py，而不是 dataupload/config.py
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 import config
 
 logger = logging.getLogger(__name__)
@@ -276,16 +281,15 @@ class VocabLoad:
 
     def export_for_opensearch(self, output_dir: str = None) -> Dict[str, Any]:
         """导出OpenSearch分析器格式文件"""
-        from config import VOCAB_EXPORT_DIR
         try:
             logger.info("开始导出OpenSearch分析器格式文件")
             logger.info(f"输出目录: {output_dir}")
             
             # 参数验证
             if output_dir is None:
-                output_dir = VOCAB_EXPORT_DIR
+                output_dir = config.VOCAB_EXPORT_DIR
             if not output_dir:
-                output_dir = VOCAB_EXPORT_DIR
+                output_dir = config.VOCAB_EXPORT_DIR
             
             # 确保输出目录存在
             if not os.path.exists(output_dir):

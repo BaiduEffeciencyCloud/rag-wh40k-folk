@@ -47,7 +47,7 @@ class VocabMgr:
                 access_key_secret=config.OSS_ACCESS_KEY_SECRET,
                 endpoint=config.OSS_ENDPOINT,
                 bucket_name=config.OSS_BUCKET_NAME_DICT,
-                region=getattr(config, 'OSS_REGION', 'cn-hangzhou'),
+                region=getattr(config, 'OSS_REGION', 'cn-beijing'),
             )
             vocab: Dict[str, Any] = {}
             # 优先尝试动态列举：若无list能力，可按常用枚举
@@ -103,7 +103,7 @@ class VocabMgr:
             )
             for category, terms in vocabulary.items():
                 key = f"vocabulary/{category}.json"
-                ok = oss.storage(json.dumps(terms, ensure_ascii=False).encode('utf-8'), key)
+                ok = oss.storage(data=json.dumps(terms, ensure_ascii=False).encode('utf-8'), oss_path=key)
                 if not ok:
                     logger.error(f"云端保存失败: {key}")
                     return False

@@ -1,5 +1,6 @@
 import sys, os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 优先确保项目根在模块搜索路径最前，避免将 dataupload/config.py 误识别为全局 config.py
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
 from datetime import datetime
 import logging
@@ -15,6 +16,8 @@ import ahocorasick
 import dataupload.config as global_config
 from dataupload.phrase_weight import PhraseWeightScorer, AutoThresholdPhraseWeightScorer
 from dataupload.wh40k_whitelist_generator import WH40KWhitelistGenerator
+import config as project_config
+from storage.oss_storage import OSSStorage
 # 加载.env配置
 dotenv.load_dotenv()
 
@@ -204,8 +207,8 @@ def extract_phrases(texts, min_freq=5, min_pmi=3.0, max_len=6, do_filter=True):
             if is_valid_token(phrase, do_filter):
                 phrase_set.add(phrase)
     # 直接返回短语集（不再合并whitelist）
-    print("[DEBUG] unigram_counter:", unigram_counter.most_common(10))
-    print("[DEBUG] phrases count:", len(phrase_set))
+    logging.debug("[DEBUG] unigram_top10=%s", unigram_counter.most_common(10))
+    logging.debug("[DEBUG] phrases_count=%d", len(phrase_set))
     return sorted(phrase_set)
 
 def generate_whitelist(phrases, output_path, unigram_counter=None, do_filter=True, phrase_df=None, phrase_pmi=None, scorer=None, config=None):
@@ -219,7 +222,7 @@ def generate_whitelist(phrases, output_path, unigram_counter=None, do_filter=Tru
             phrase_df = config['phrase_df']
         if 'phrase_pmi' in config:
             phrase_pmi = config['phrase_pmi']
-    print("[DEBUG] generate_whitelist, phrases count:", len(phrases))
+    logging.debug("[DEBUG] generate_whitelist phrases_count=%d", len(phrases))
     max_freq = max(unigram_counter.values()) if unigram_counter else 1000
     idf0 = max_freq + 1
     meta = {}
@@ -256,7 +259,7 @@ def generate_whitelist(phrases, output_path, unigram_counter=None, do_filter=Tru
     logging.info(f"✅ OpenSearch词典已保存: {warhammer_dict_path}")
 
 def save_bm25_vocab(bm25_manager, output_path, do_filter=True, scorer=None, phrase_df=None, phrase_pmi=None):
-    print("[DEBUG] save_bm25_vocab, vocab size:", len(bm25_manager.vocabulary))
+    logging.debug("[DEBUG] save_bm25_vocab vocab_size=%d", len(bm25_manager.vocabulary))
     
     # 1. 生成传统格式词典（保持向后兼容）
     vocab_dict = {}
@@ -562,6 +565,42 @@ def generate_userdict_and_vocab(input_dir, output_dir, min_freq=5, min_pmi=3.0, 
     # 保存词汇表
     save_bm25_vocab(bm25, vocab_path, scorer=scorer, phrase_df=phrase_df, phrase_pmi=phrase_pmi)
     
+    # 云端上载（保留本地副本）
+    try:
+        if getattr(global_config, 'CLOUD_STORAGE', True):
+            oss = OSSStorage(
+                access_key_id=project_config.OSS_ACCESS_KEY,
+                access_key_secret=project_config.OSS_ACCESS_KEY_SECRET,
+                endpoint=project_config.OSS_ENDPOINT,
+                bucket_name=project_config.OSS_BUCKET_NAME_DICT,
+                region=project_config.OSS_REGION
+            )
+            # userdict 上传
+            try:
+                if os.path.exists(dict_path):
+                    with open(dict_path, 'rb') as f:
+                        data = f.read()
+                    key = os.path.basename(dict_path)
+                    ok_ud = oss.storage(data=data, oss_path=key)
+                    uri = f"oss://{project_config.OSS_BUCKET_NAME_DICT}/{key}"
+                    logging.info(f"[OSS] upload userdict: bucket={project_config.OSS_BUCKET_NAME_DICT}, key={key}, uri={uri}, bytes={len(data)}, ok={ok_ud}")
+            except Exception as e:
+                logging.error(f"[OSS] upload userdict failed: {e}")
+            # freq vocab 上传
+            try:
+                freq_path = vocab_path.replace('bm25_vocab_', 'bm25_vocab_freq_')
+                if os.path.exists(freq_path):
+                    with open(freq_path, 'rb') as f:
+                        data = f.read()
+                    key = os.path.basename(freq_path)
+                    ok_fv = oss.storage(data=data, oss_path=key)
+                    uri = f"oss://{project_config.OSS_BUCKET_NAME_DICT}/{key}"
+                    logging.info(f"[OSS] upload freq vocab: bucket={project_config.OSS_BUCKET_NAME_DICT}, key={key}, uri={uri}, bytes={len(data)}, ok={ok_fv}")
+            except Exception as e:
+                logging.error(f"[OSS] upload freq vocab failed: {e}")
+    except Exception as e:
+        logging.error(f"[OSS] upload stage error: {e}")
+
     return dict_path, vocab_path
 
 def main():

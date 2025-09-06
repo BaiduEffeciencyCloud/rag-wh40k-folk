@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 from setuptools._distutils.util import strtobool
+import config as project_config
 
 logger = logging.getLogger(__name__)
 
@@ -18,25 +19,26 @@ class BM25Config:
     def __init__(self):
         """初始化BM25配置"""
         try:
+            # 直接使用项目 config.py 常量，缺失则退回默认
             # BM25算法参数
-            self.k1 = self._get_float('BM25_K1', 1.5)
-            self.b = self._get_float('BM25_B', 0.75)
-            self.min_freq = self._get_int('BM25_MIN_FREQ', 5)
-            self.max_vocab_size = self._get_int('BM25_MAX_VOCAB_SIZE', 10000)
-            
+            self.k1 = getattr(project_config, 'BM25_K1', 1.5)
+            self.b = getattr(project_config, 'BM25_B', 0.75)
+            self.min_freq = getattr(project_config, 'BM25_MIN_FREQ', 5)
+            self.max_vocab_size = getattr(project_config, 'BM25_MAX_VOCAB_SIZE', 10000)
+
             # 文件路径配置
-            self.model_dir = self._get_str('BM25_MODEL_DIR', 'models')
-            self.vocab_dir = self._get_str('BM25_VOCAB_DIR', 'dict')
-            self.model_filename = self._get_str('BM25_MODEL_FILENAME', 'bm25_model.pkl')
-            self.vocab_filename_pattern = self._get_str('BM25_VOCAB_FILENAME_PATTERN', 'bm25_vocab_{timestamp}.json')
-            
+            self.model_dir = getattr(project_config, 'BM25_MODEL_DIR', 'models')
+            self.vocab_dir = getattr(project_config, 'BM25_VOCAB_DIR', 'dict')
+            self.model_filename = getattr(project_config, 'BM25_MODEL_FILENAME', 'bm25_model.pkl')
+            self.vocab_filename_pattern = getattr(project_config, 'BM25_VOCAB_FILENAME_PATTERN', 'bm25_vocab_{timestamp}.json')
+
             # 训练配置
-            self.enable_incremental = self._get_bool('BM25_ENABLE_INCREMENTAL', True)
-            self.save_after_update = self._get_bool('BM25_SAVE_AFTER_UPDATE', True)
-            
+            self.enable_incremental = getattr(project_config, 'BM25_ENABLE_INCREMENTAL', True)
+            self.save_after_update = getattr(project_config, 'BM25_SAVE_AFTER_UPDATE', True)
+
             # 性能配置
-            self.batch_size = self._get_int('BM25_BATCH_SIZE', 1000)
-            self.cache_size = self._get_int('BM25_CACHE_SIZE', 1000)
+            self.batch_size = getattr(project_config, 'BM25_BATCH_SIZE', 1000)
+            self.cache_size = getattr(project_config, 'BM25_CACHE_SIZE', 1000)
             
         except Exception as e:
             logger.error(f"BM25配置初始化失败: {e}")

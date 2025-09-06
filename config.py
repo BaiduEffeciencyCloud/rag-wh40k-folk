@@ -208,3 +208,19 @@ RETRY_DELAY = 2.0  # 重试延迟（秒）
 # === OSS配置 ===
 CLOUD_STORAGE=True
 
+# ========== OSS 内存缓存配置 ==========
+# 是否启用 OSS 内存缓存
+OSS_CACHE_ENABLED = True
+# 缓存条目 TTL（秒）
+OSS_CACHE_TTL_SECONDS = 60
+# LRU 最大条目数
+OSS_CACHE_MAX_ITEMS = 512
+# 可选：总字节上限；None 表示不限制（暂未使用）
+OSS_CACHE_MAX_BYTES = None
+# 校验模式：'etag' | 'last_modified' | 'both'
+OSS_CACHE_VALIDATE_MODE = 'etag'
+# 允许缓存的 Key 前缀列表；为空表示不限制（全缓存）
+OSS_CACHE_ALLOWED_KEY_PREFIXES = ['bm25_vocab_freq_', 'all_docs_dict_', 'vocabulary/', 'templates/','pipeline/','search/']
+# 仅缓存不超过该大小（字节）的对象
+OSS_CACHE_MAX_OBJECT_SIZE = 5 * 1024 * 1024
+

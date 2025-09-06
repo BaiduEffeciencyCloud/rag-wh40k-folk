@@ -10,7 +10,12 @@ from .dense_search import DenseSearchEngine
 from .base_search import BaseSearchEngine
 from embedding.em_factory import EmbeddingFactory
 from conn.osconn import OpenSearchConnection
+import config
+from storage.oss_storage import OSSStorage
 logger = logging.getLogger(__name__)
+from dataupload.bm25_config import BM25Config
+from dataupload.bm25_manager import BM25Manager
+import glob
 
 class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
     """Hybrid混合搜索引擎，融合dense和sparse搜索"""
@@ -27,22 +32,59 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
     def _load_bm25_manager(self):
         """加载BM25Manager和词典，参考SparseSearchEngine，自动加载白名单userdict"""
         try:
-            from dataupload.bm25_config import BM25Config
-            from dataupload.bm25_manager import BM25Manager
-            import glob
             self.bm25_config = BM25Config()
-            # 自动查找最新白名单userdict
+            # Phase-1: 初始化云端读能力（仍回退本地）
+            cloud_userdict_bytes = None
+            cloud_vocab_bytes = None
+            if getattr(config, 'CLOUD_STORAGE', False):
+                try:
+                    oss = OSSStorage(
+                        access_key_id=config.OSS_ACCESS_KEY,
+                        access_key_secret=config.OSS_ACCESS_KEY_SECRET,
+                        endpoint=config.OSS_ENDPOINT,
+                        bucket_name=config.OSS_BUCKET_NAME_DICT,
+                        region=config.OSS_REGION
+                    )
+                    # 列举云端对象
+                    try:
+                        freq_keys = oss.list_objects(prefix='bm25_vocab_freq_') or []
+                    except Exception:
+                        freq_keys = []
+                    try:
+                        dict_keys = oss.list_objects(prefix='all_docs_dict_') or []
+                    except Exception:
+                        dict_keys = []
+                    # 简单按key字面排序（YYMMDDHHMMSS即时间序）并读取bytes
+                    if freq_keys:
+                        freq_keys.sort()
+                        latest_freq_key = freq_keys[-1]
+                        try:
+                            cloud_vocab_bytes = oss.load(latest_freq_key)
+                        except Exception:
+                            pass
+                    if dict_keys:
+                        dict_keys.sort()
+                        latest_ud_key = dict_keys[-1]
+                        try:
+                            cloud_userdict_bytes = oss.load(latest_ud_key)
+                        except Exception:
+                            pass
+                    logger.info("已启用云端读取能力（云端优先：若bytes拉取成功将直接注入BM25Manager）")
+                except Exception as e:
+                    logger.warning(f"云端读取初始化失败，回退本地: {e}")
+            # 白名单来源：云端优先；云端失败时再进行本地glob回退
             project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             dict_dir = os.path.join(project_root, "dict")
-            whitelist_files = glob.glob(os.path.join(dict_dir, "all_docs_dict_*.txt"))
-            whitelist_files = [f for f in whitelist_files if not f.endswith(".meta.json")]
             whitelist_path = None
-            if whitelist_files:
-                whitelist_files.sort(reverse=True)
-                whitelist_path = whitelist_files[0]
-                logger.info(f"检测到白名单userdict: {whitelist_path}")
-            else:
-                logger.info("未检测到白名单userdict，按无白名单流程加载BM25Manager")
+            if not cloud_userdict_bytes:
+                whitelist_files = glob.glob(os.path.join(dict_dir, "all_docs_dict_*.txt"))
+                whitelist_files = [f for f in whitelist_files if not f.endswith(".meta.json")]
+                if whitelist_files:
+                    whitelist_files.sort(reverse=True)
+                    whitelist_path = whitelist_files[0]
+                    logger.info(f"检测到白名单userdict: {whitelist_path}")
+                else:
+                    logger.info("未检测到白名单userdict，按无白名单流程加载BM25Manager")
             self.bm25_manager = BM25Manager(
                 k1=self.bm25_config.k1,
                 b=self.bm25_config.b,
@@ -50,22 +92,43 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
                 max_vocab_size=self.bm25_config.max_vocab_size,
                 user_dict_path=whitelist_path
             )
+            # 若云端bytes可用，优先注入BM25Manager（不触盘）
+            if cloud_userdict_bytes:
+                try:
+                    self.bm25_manager.load_userdict_from_bytes(cloud_userdict_bytes)
+                    logger.info("已从云端bytes加载userdict（白名单）")
+                except Exception as e:
+                    logger.warning(f"云端userdict bytes加载失败，忽略并回退本地: {e}")
+            vocab_loaded_from_cloud = False
+            if cloud_vocab_bytes:
+                try:
+                    self.bm25_manager.load_dictionary_from_bytes(cloud_vocab_bytes)
+                    vocab_loaded_from_cloud = True
+                    logger.info("已从云端bytes加载BM25词典")
+                except Exception as e:
+                    logger.warning(f"云端词典 bytes加载失败，回退本地: {e}")
             # 使用项目根目录的绝对路径
             # 从searchengine/hybrid_search.py -> 项目根目录
             project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             dict_dir = os.path.join(project_root, "dict")
-            vocab_path = self.bm25_manager.get_latest_freq_dict_file(dict_dir)
-            if not vocab_path or not os.path.exists(vocab_path):
-                logger.error("未找到有效的词汇表文件")
-                raise FileNotFoundError("未找到有效的词汇表文件")
+            vocab_path = None
+            if not vocab_loaded_from_cloud:
+                vocab_path = self.bm25_manager.get_latest_freq_dict_file(dict_dir)
+                if not vocab_path or not os.path.exists(vocab_path):
+                    logger.error("未找到有效的词汇表文件（云端与本地均不可用）")
+                    raise FileNotFoundError("未找到有效的词汇表文件")
             # 使用项目根目录的绝对路径
             model_path = os.path.join(project_root, self.bm25_config.get_model_path())
             if os.path.exists(model_path):
-                self.bm25_manager.load_model(model_path, vocab_path)
-                logger.info(f"成功加载BM25模型，模型路径: {model_path}, 词典路径: {vocab_path}")
+                # 有模型文件则优先载入模型；若无本地vocab_path且已用云端bytes加载词典，则用一个占位路径
+                self.bm25_manager.load_model(model_path, vocab_path if vocab_path else os.path.join(dict_dir, "bm25_vocab_freq_latest.json"))
+                logger.info("成功加载BM25模型")
             else:
-                self.bm25_manager.load_dictionary(vocab_path)
-                logger.info(f"成功加载BM25词汇表，词典路径: {vocab_path}（模型文件不存在，需要重新训练）")
+                if not vocab_loaded_from_cloud:
+                    self.bm25_manager.load_dictionary(vocab_path)
+                    logger.info(f"成功加载BM25词汇表，词典路径: {vocab_path}（模型文件不存在，需要重新训练）")
+                else:
+                    logger.info("成功加载BM25词汇表（来自云端bytes，未落盘；模型文件不存在，需要重新训练）")
         except Exception as e:
             logger.error(f"加载BM25Manager失败: {str(e)}")
             self.bm25_manager = None

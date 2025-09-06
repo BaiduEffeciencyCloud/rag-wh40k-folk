@@ -38,9 +38,10 @@ class ConfigurableStorage:
         
         return self._storage
     
-    def storage(self, data: Any, path: str, **kwargs) -> bool:
+    def storage(self, *, data: Any, path: str, **kwargs) -> bool:
         """存储数据"""
-        return self.get_storage().storage(data, path, **kwargs)
+        # 统一关键字参数传递，避免位置参数误用
+        return self.get_storage().storage(data=data, oss_path=path, **kwargs)
     
     def load(self, path: str, **kwargs) -> Optional[bytes]:
         """加载数据"""

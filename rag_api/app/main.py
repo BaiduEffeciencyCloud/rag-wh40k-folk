@@ -1,8 +1,8 @@
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from app.api import query, intent, health
-from app.services.model_service import ModelService
+from .api import query, intent, health
+from .services.model_service import ModelService
 
 logger = logging.getLogger(__name__)
 

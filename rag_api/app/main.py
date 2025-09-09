@@ -1,7 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from .api import query, intent, health
+from .api import query, intent, health, streamquery
 from .services.model_service import ModelService
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ app.state.model_service = model_service
 
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(query.router, prefix="/query", tags=["query"])
+app.include_router(streamquery.router, prefix="/streamquery", tags=["streamquery"])
 app.include_router(intent.router, prefix="/intent", tags=["intent"])
 
 @app.get("/")

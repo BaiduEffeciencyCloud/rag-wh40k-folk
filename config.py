@@ -87,12 +87,9 @@ if not all([NEO4J_TEST_URI, NEO4J_TEST_USERNAME, NEO4J_TEST_PASSWORD]):
 
 # 答案生成配置
 DEFAULT_TEMPERATURE = 0.3  # 默认温度参数，控制生成文本的随机性
-MAX_ANSWER_TOKENS = 2000  # 答案生成最大token数
-
+MAX_ANSWER_TOKENS = 3000  # 答案生成最大token数
 # 并发配置
 DEFAULT_MAX_WORKERS = 4  # 默认RAGAS最大并发工作线程数
-
-
 
 # 指数退避配置
 USE_EXPONENTIAL_BACKOFF = True  # 是否使用指数退避策略
@@ -129,17 +126,17 @@ DEBUG_ANALYZE = True  # 搜索分析调试开关，默认关闭
 
 # ========== Pipeline混合搜索配置 ==========
 # Pipeline混合搜索算法参数配置
-PIPELINE_NORMALIZATION_TECHNIQUE = "min_max"  # 归一化技术：min_max, z_score, decimal_scaling, log_scale
-PIPELINE_COMBINATION_TECHNIQUE = "arithmetic_mean"  # 组合技术：arithmetic_mean, geometric_mean, harmonic_mean, weighted_sum
-PIPELINE_BM25_BOOST = 1.5  # BM25搜索boost值，影响BM25结果权重
-PIPELINE_VECTOR_BOOST = 1.0  # 向量搜索boost值，影响向量搜索结果权重
+#PIPELINE_NORMALIZATION_TECHNIQUE = "min_max"  # 归一化技术：min_max, z_score, decimal_scaling, log_scale
+#PIPELINE_COMBINATION_TECHNIQUE = "arithmetic_mean"  # 组合技术：arithmetic_mean, geometric_mean, harmonic_mean, weighted_sum
+#PIPELINE_BM25_BOOST = 1.5  # BM25搜索boost值，影响BM25结果权重
+#PIPELINE_VECTOR_BOOST = 1.0  # 向量搜索boost值，影响向量搜索结果权重
 
 # ========== Match Phrase查询配置 ==========
 # Match Phrase查询算法参数配置
 
 # ========== 混合搜索优化配置 ==========
 # OpenSearch Analyzer配置
-OPENSEARCH_INDEX_ANALYZER = "warhammer_index_analyzer"      # 索引时使用的analyzer
+#OPENSEARCH_INDEX_ANALYZER = "warhammer_index_analyzer"      # 索引时使用的analyzer
 OPENSEARCH_SEARCH_ANALYZER = "warhammer_search_analyzer"    # 搜索时使用的analyzer
 
 # 搜索字段权重配置
@@ -154,7 +151,7 @@ SEARCH_FIELD_WEIGHTS = {
 # rerank 模型
 RERANK_MODEL = "bge-reranker-v2-m3"  # 默认重排序模型
 ALIYUN_RERANK_MODEL = "gte-rerank-v2"  # 阿里云重排序模型
-RERANK_TOPK = 25  # 重排序返回结果数量
+RERANK_TOPK = 15  # 重排序返回结果数量
 
 # BM25相关配置
 BM25_K1 = 1.5  # BM25算法k1参数，控制词频饱和速度
@@ -207,7 +204,6 @@ RETRY_DELAY = 2.0  # 重试延迟（秒）
 
 # === OSS配置 ===
 CLOUD_STORAGE=True
-
 # ========== OSS 内存缓存配置 ==========
 # 是否启用 OSS 内存缓存
 OSS_CACHE_ENABLED = True
@@ -223,4 +219,8 @@ OSS_CACHE_VALIDATE_MODE = 'etag'
 OSS_CACHE_ALLOWED_KEY_PREFIXES = ['bm25_vocab_freq_', 'all_docs_dict_', 'vocabulary/', 'templates/','pipeline/','search/']
 # 仅缓存不超过该大小（字节）的对象
 OSS_CACHE_MAX_OBJECT_SIZE = 5 * 1024 * 1024
+
+#====答案输出=====
+STREAM_MODE = True
+
 

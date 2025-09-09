@@ -26,8 +26,6 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
         self.dense_engine = None
         # 加载BM25Manager
         self.bm25_manager = None
-        self._load_bm25_manager()
-        logger.info("Hybrid搜索引擎初始化完成")
 
     def _load_bm25_manager(self):
         """加载BM25Manager和词典，参考SparseSearchEngine，自动加载白名单userdict"""
@@ -144,7 +142,8 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             Dict[str, List]: 包含indices和values的稀疏向量
         """
         if not self.bm25_manager:
-            raise RuntimeError("BM25Manager未初始化")
+            # 占位稀疏，保障 RRF 链路参数完整
+            return {"indices": [], "values": []}
         try:
             sparse_vector = self.bm25_manager.get_sparse_vector(query_text)
             logger.info(f"BM25稀疏向量生成成功，indices: {sparse_vector['indices'][:5]}...")
@@ -153,7 +152,8 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
             return sparse_vector
         except Exception as e:
             logger.warning(f"生成sparse向量失败: {str(e)}")
-            raise
+            # 失败时使用占位，避免中断
+            return {"indices": [], "values": []}
 
     def search(self, query, intent: str, top_k=10, db_conn=None, embedding_model=None, rerank=True, **kwargs):
         """
@@ -200,6 +200,13 @@ class HybridSearchEngine(BaseSearchEngine, SearchEngineInterface):
         
         try:
             if algorithm == 'rrf':
+                # 仅在 RRF 时按需加载 BM25
+                if self.bm25_manager is None:
+                    try:
+                        self._load_bm25_manager()
+                    except Exception:
+                        # 加载失败允许继续，后续将使用占位 sparse
+                        pass
                 # 使用RRF算法
                 results = self._search_with_rrf(query_text,query_intent,filter_dict, top_k, alpha, db_conn, embedding_model, rerank=rerank)
             else:

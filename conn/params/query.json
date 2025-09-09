@@ -67,6 +67,10 @@
   },
   "RERANK": {
     "ALIYUN_RERANK_MODEL": "gte-rerank-v2",
-    "RERANK_TOPK": 25
+    "RERANK_TOPK": 20
+  },
+  "LOG_CONF": {
+    "SEARCH_ANALYSIS_LOG_FILE": "logs/search_analysis.log",
+    "SEARCH_ANALYSIS_LOG_MAX_SIZE": 5242880
   }
 }

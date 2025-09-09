@@ -1,0 +1,164 @@
+帝国,Imperium
+星界军,Imperium Guard,帝国卫队,IG
+战斗修女,Battle Sister,修女,SOB
+帝国骑士,Imperial Knight,骑士,IK
+帝皇禁军,禁军,Custodes,AC
+机械神教,Adeptus Mechanicus,AM,机油佬,机械教
+星际战士,Space Marine,SM,Adeptus Astartes
+圣血天使,Blood Angels,BA
+太空野狼,Space Wolves,SW,狼团
+暗鸦守卫,Raven Guard,鸦团,暗鸭守卫
+暗黑天使,Dark Angel,DA
+帝国之拳,Imperial Fists,帝拳,地台拳,弟拳
+火蜥蜴,Salamander,黑叔叔
+白色伤疤,White Scar,白疤
+极限战士,Ultramarine,UM
+钢铁之手,Iron Hands,IH,铁手
+死亡守望,Deathwatch,DW,死看
+灰骑士,Grey Knights,GK
+混沌,Chaos
+混沌星际战士,Chaos Space Marine,CSM,叛军阿斯塔特
+混沌恶魔,Chaos Demon,CD,恶魔
+混沌骑士,Chaos Knight,CK
+吞世者,World Eaters,WE,砍砍
+死亡守卫,Death Guard,DG,死守,臭罐头
+千子,Thousand Sons,TS,千子军团
+帝皇之子,Emperor's Children,EC,帝子
+异形,Xenos,外星人
+绿皮兽人,Orks,绿皮,兽人
+黑暗灵族,Drukhari,黑豆芽
+钛帝国,Tau,蓝皮,渔民
+太空死灵,Necrons,NEC,死灵
+沃坦联盟,Leagues of Votann,太空矮人,矮人,矮子,短人
+基因窃取者教派,Genestealer Cult,GSC,基因窃取者,鸡贼
+泰伦虫族,Tyranids,Nids,虫族,虫子
+艾达灵族,方舟灵族,豆芽,白豆芽
+阿苏焉尼,Asuryani
+丑角,Harlequins
+死神军,Ynnari
+战锤40K,Warhammer,wh40k,战锤,40k
+总规则,核心规则,总规,GW核心规则,GW官方规则
+FAQ,游戏FAQ
+种族codex,种族规则,codex,军书,规则书
+军队,全军,army
+GW,games workshop
+平衡补丁,balance slate,balanceslate
+分数表,MFM,Munitorum Field Mannual
+战略预备队,Strategic Reserve
+从预备队入场,侧击
+上车,embark,乘车
+下车,disembark
+部署,deploy
+结算分数,算分
+主任务,primary mission,primary
+次要任务,secondary mission,secondary,secondaries
+任务卡,抽卡
+指挥阶段,Command Phase
+移动阶段,Movement Phase
+增援阶段,Reinforcement Phase
+士气测试,Leadership Test
+灵能,psychic
+判定,test,测试
+移动,move
+斥候移动,scout,scout move,斥候
+撤退,retreat,撤
+溃逃,逃跑
+地形,terrain,terrain feature,建筑物,废墟
+射击,shooting,shoot
+近战,melee,fight,砍
+装甲保护,Armor Save,保护,保
+特殊保护,Invulnerable Save
+不怕疼,Feel no pain,FNP
+种族,Faction,势力,族
+分队,Detachment,军,军阵,host,legion,军团
+单位,Unit
+单位数据,Unit Profile
+模型,Model
+底盘尺寸,Base Size
+M,Movement,移动距离,移动值
+S,Strength,力量,力量值
+T,Toughness,坚韧
+W,Wounds,血量,生命值
+BS,Ballistic Skill,射击技巧
+WS,Weapon Skill,武器技巧
+LD,士气,领导力
+OC,Object control
+计谋,Strategem,战略计谋,CP技能
+能力,Ability,技能
+关键字,Keyword
+领导,Lead
+战斗震慑,Battle Shock
+军队规则,Army Rule
+分队规则,Detachment Rule
+致命一击,lethal Hit
+突击,assault
+重型,heavy
+精准,precision,狙
+危险,hazardous
+针对步兵,反步兵,anti-infantry
+针对载具,反载具,anti-vehicle
+针对巨兽,反巨兽,anti-monster
+针对骑乘,反骑乘,anti-mount
+针对灵能者,反灵能者,anti-psyker
+针对角色,反角色,anti-character
+针对飞行,反飞行,anti-fly
+洪流,torrent,喷火器
+深入打击,Deep Strike,DS
+致命破灭,爆炸,explode
+步兵,infantry
+骑乘,mounted
+巨兽,monster
+载具,vehicle
+野兽,beast
+灵能者,psyker
+角色,character
+飞行,fly
+隐秘,stealth
+专属运输,dedicat transport,专属载具
+集群,swarm
+幽冥之刃,近战蛋,近战小蛋
+幽冥护卫,射击蛋,射击小蛋
+幽冥领主,大蛋
+独角,solitaire
+告死小丑,Death Jester
+剧团长,Troupe master
+终结者小队,Terminator Squad
+埃尔德拉德 · 乌斯兰,艾尔德拉德.乌斯兰,艾尔德拉德,老神棍
+翔空司战,跳包司战,飞包司战
+大先知,先知,farseer
+天行者大先知,摩托先知
+凤凰领主,Phoenix Lord,Phoenix Lords,凤主
+阿苏曼,Asurmen
+巴哈罗斯,Baharroth,翔鹰领主
+弗甘,Fuegan,火龙领主
+贾因 · 扎尔,Jain Zar,女妖领主
+莱凯丝,Lhykhis,蜘蛛领主,蜘蛛妹妹,蜘蛛妹
+矛甘 · 拉,麻杆拉,马甘拉,黑死神领主,Maugan Ra
+虚空掠夺者海盗,豆芽海盗,灵族海盗,海盗
+黑暗死神,Dark reaper,黑死神
+凶暴复仇者,复仇者
+烈焰火龙,火龙,fire dragon
+狂嚎女妖,女妖,howling banshee
+突击蝎,striking scorpion
+翔鹰,鹰,swooping hawk
+次元蜘蛛,蜘蛛,warp spider
+闪矛,shining spear
+战巫密会,warlock conclave
+次元炮平台,D炮
+音波炮平台,震击炮平台
+御风者,民兵摩托,摩托
+帷幕奔行者,游侠摩托
+天行者战巫,摩托战巫
+波蛇飞艇,wave serpent,波蛇
+猎鹰坦克,猎鹰,falcon
+炎晶坦克,炎晶,fire prism
+织夜者坦克,织夜者,织夜
+战争行者,war walker,战走
+幽冥骑士,超级蛋
+伊弗蕾妮,Yvraine,摄政王夫人,夫人,王夫人
+因卡恩死神化身,Yncarne,死神化身
+死神军魅魔,血腥魔女
+织空者摩托,Skyweaver,织天者摩托,织天者,丑角摩托
+织星者飞艇,织星者
+千面,维萨奇,舔狗
+虚空编织者炮艇,织虚者飞艇,织虚者,丑角炮艇

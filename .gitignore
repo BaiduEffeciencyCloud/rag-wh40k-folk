@@ -6,9 +6,6 @@ venv/
 env/
 ENV/
 
-#docker文件
-docker/
-
 # Python缓存文件
 __pycache__/
 *.py[cod]
@@ -19,10 +16,11 @@ raw_chunk/
 # 日志文件
 *.log
 #存放文档
-document/
+/document/
 #模型和词典位置
-dict/
-models/
+/dict/
+/models/
+
 #意图识别模块的产出和原始数据
 intent_training/data/raw
 intent_training/model_output
@@ -35,12 +33,12 @@ test/
 test/testdata/
 chunks/
 #评估报告位置
-report/
+/report/
 dict/
 #存放测试用query&gold
 test_data/
 #存放临时的分析脚本
-ana/
+/ana/
 # IDE相关
 .idea/
 .vscode/

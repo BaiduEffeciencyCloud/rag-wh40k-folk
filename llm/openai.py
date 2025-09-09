@@ -68,6 +68,64 @@ class OpenAILLM(LLMInterface):
         logger.info(f"OpenAI响应: {response}")
         return response.choices[0].message.content.strip()
     
+    def call_llm_stream(self,
+                        prompt: Union[str, List[Dict[str, str]]],
+                        temperature: float = DEFAULT_TEMPERATURE,
+                        max_tokens: int = MAX_ANSWER_TOKENS,
+                        *,
+                        granularity: str = "chunk",
+                        event_mode: bool = False,
+                        fallback_to_sync: bool = True,
+                        **kwargs):
+        """OpenAI 兼容接口的流式输出。"""
+        model_name = self.default_model
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        elif isinstance(prompt, list):
+            messages = prompt
+        else:
+            raise ValueError("prompt必须是字符串或消息列表")
+
+        try:
+            stream = self.client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True,
+                **kwargs
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices and chunk.choices[0] else None
+                content = getattr(delta, 'content', None) if delta else None
+                if not content:
+                    continue
+                if event_mode:
+                    if granularity == "char":
+                        for ch in content:
+                            yield {"type": "token", "content": ch}
+                    else:
+                        yield {"type": "token", "content": content}
+                else:
+                    if granularity == "char":
+                        for ch in content:
+                            yield ch
+                    else:
+                        yield content
+            if event_mode:
+                yield {"type": "event", "finish_reason": getattr(chunk.choices[0], 'finish_reason', 'stop') if chunk and chunk.choices else 'stop'}
+        except Exception as e:
+            logger.warning(f"OpenAI 流式输出失败，fallback_to_sync={fallback_to_sync}: {e}")
+            if fallback_to_sync:
+                text = self.call_llm(prompt, temperature=temperature, max_tokens=max_tokens, **kwargs)
+                if event_mode:
+                    yield {"type": "token", "content": text}
+                    yield {"type": "event", "finish_reason": "fallback"}
+                else:
+                    yield text
+            else:
+                raise
+    
     def build_messages(self, 
                       system_prompt: Optional[str] = None, 
                       user_prompt: str = "",

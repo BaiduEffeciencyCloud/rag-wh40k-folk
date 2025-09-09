@@ -1,0 +1,143 @@
+
+{
+  "settings": {
+    "index": {
+      "knn": true,
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    },
+    "analysis": {
+      "analyzer": {
+        "warhammer_index_analyzer": {
+          "type": "custom",
+          "tokenizer": "ik_smart",
+          "filter": [
+            "lowercase",
+            "warhammer_dict_filter"
+          ]
+        },
+        "warhammer_search_analyzer": {
+          "type": "custom",
+          "tokenizer": "ik_smart",
+          "filter": [
+            "lowercase",
+            "warhammer_synonyms",
+            "warhammer_dict_filter"
+          ]
+        }
+      },
+      "filter": {
+        "warhammer_dict_filter": {
+          "type": "keep",
+          "keep_words_path": "analysis/warhammer_dict.txt"
+        },
+        "warhammer_synonyms": {
+          "type": "synonym_graph",
+          "synonyms_path": "analysis/warhammer_synonyms.txt",
+          "updateable": true
+        }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "id": { "type": "keyword" },
+      "text": {
+        "type": "text",
+        "analyzer": "warhammer_index_analyzer",
+        "search_analyzer": "warhammer_search_analyzer"
+      },
+      "section_heading": {
+        "type": "text",
+        "analyzer": "warhammer_index_analyzer",
+        "search_analyzer": "warhammer_search_analyzer"
+      },
+      "sub_section": {
+        "type": "text",
+        "analyzer": "warhammer_index_analyzer",
+        "search_analyzer": "warhammer_search_analyzer"
+      },
+      "chunk_type": { "type": "keyword" },
+      "content_type": { "type": "keyword" },
+      "faction": { "type": "keyword" },
+      "h1": {
+        "type": "keyword",
+        "fields": {
+          "text": {
+            "type": "text",
+            "analyzer": "warhammer_index_analyzer",
+            "search_analyzer": "warhammer_search_analyzer"
+          }
+        }
+      },
+      "h2": {
+        "type": "keyword",
+        "fields": {
+          "text": {
+            "type": "text",
+            "analyzer": "warhammer_index_analyzer",
+            "search_analyzer": "warhammer_search_analyzer"
+          }
+        }
+      },
+      "h3": {
+        "type": "keyword",
+        "fields": {
+          "text": {
+            "type": "text",
+            "analyzer": "warhammer_index_analyzer",
+            "search_analyzer": "warhammer_search_analyzer"
+          }
+        }
+      },
+      "h4": {
+        "type": "keyword",
+        "fields": {
+          "text": {
+            "type": "text",
+            "analyzer": "warhammer_index_analyzer",
+            "search_analyzer": "warhammer_search_analyzer"
+          }
+        }
+      },
+      "h5": {
+        "type": "keyword",
+        "fields": {
+          "text": {
+            "type": "text",
+            "analyzer": "warhammer_index_analyzer",
+            "search_analyzer": "warhammer_search_analyzer"
+          }
+        }
+      },
+      "h6": {
+        "type": "keyword",
+        "fields": {
+          "text": {
+            "type": "text",
+            "analyzer": "warhammer_index_analyzer",
+            "search_analyzer": "warhammer_search_analyzer"
+          }
+        }
+      },
+      "embedding": {
+        "type": "knn_vector",
+        "dimension": 2048,
+        "method": {
+          "name": "hnsw",
+          "engine": "faiss",
+          "space_type": "innerproduct",
+          "parameters": {
+            "m": 64,
+            "ef_construction": 512,
+            "ef_search": 256
+          }
+        }
+      },
+      "sparse": { "type": "rank_features" },
+      "source_file": { "type": "keyword" },
+      "chunk_index": { "type": "integer" },
+      "created_at": { "type": "date" }
+    }
+  }
+}

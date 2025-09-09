@@ -9,6 +9,25 @@ import os
 import logging
 import threading
 from typing import Optional, Dict, Any
+
+# ===== 在模块导入阶段设置国内网络必要环境变量（确保下方库初始化前生效）=====
+os.environ.setdefault('HUGGINGFACE_HUB_ENDPOINT', 'https://hf-mirror.com')
+os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
+os.environ.setdefault('HF_HUB_ENABLE_HF_TRANSFER', '1')
+os.environ.setdefault('HF_HUB_OFFLINE', '0')
+os.environ.setdefault('HF_HUB_TIMEOUT', '120')
+
+try:
+    _shm_dir = '/dev/shm/hf_cache'
+    _tmp_dir = '/tmp/hf_cache'
+    _cache_dir = _shm_dir if os.path.isdir('/dev/shm') else _tmp_dir
+    os.makedirs(_cache_dir, exist_ok=True)
+    os.environ.setdefault('HUGGINGFACE_HUB_CACHE', _cache_dir)
+    os.environ.setdefault('TRANSFORMERS_CACHE', _cache_dir)
+except Exception:
+    # 缓存目录失败则交由默认行为处理
+    pass
+
 from sentence_transformers import SentenceTransformer
 logger = logging.getLogger(__name__)
 
@@ -78,13 +97,28 @@ class ModelManager:
                 return True
             
             logger.info(f"开始预加载模型: {model_name}")
+            # ===== 国内网络优化：必要环境变量设置（仅在未显式设置时注入）=====
+            # 镜像端点
+            os.environ.setdefault('HUGGINGFACE_HUB_ENDPOINT', 'https://hf-mirror.com')
+            os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
+            # 传输优化与超时
+            os.environ.setdefault('HF_HUB_ENABLE_HF_TRANSFER', '1')
+            os.environ.setdefault('HF_HUB_OFFLINE', '0')
+            os.environ.setdefault('HF_HUB_TIMEOUT', '30')
             
-            # 设置中国镜像站点
-            os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-            os.environ['HF_HUB_OFFLINE'] = '0'
-            
-            # 导入并加载模型
+            # 临时/内存缓存目录（不做长期落盘）：优先 /dev/shm，其次 /tmp
+            try:
+                shm_dir = '/dev/shm/hf_cache'
+                tmp_dir = '/tmp/hf_cache'
+                cache_dir = shm_dir if os.path.isdir('/dev/shm') else tmp_dir
+                os.makedirs(cache_dir, exist_ok=True)
+                os.environ.setdefault('HUGGINGFACE_HUB_CACHE', cache_dir)
+                os.environ.setdefault('TRANSFORMERS_CACHE', cache_dir)
+                logger.info(f"HuggingFace 缓存目录: {cache_dir}")
+            except Exception as _e:
+                logger.warning(f"缓存目录初始化失败，继续使用默认缓存: {_e}")
 
+            # 导入并加载模型（保持调用方式不变）
             model = SentenceTransformer(model_name)
             self.models[model_name] = model
             

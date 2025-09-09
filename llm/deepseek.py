@@ -118,3 +118,15 @@ class DeepSeekLLM(LLMInterface):
                 messages.append({"role": role, "content": content})
         
         return messages
+
+    def call_llm_stream(self,
+                        prompt: Union[str, List[Dict[str, str]]],
+                        temperature: float = DEFAULT_TEMPERATURE,
+                        max_tokens: int = MAX_ANSWER_TOKENS,
+                        *,
+                        granularity: str = "chunk",
+                        event_mode: bool = False,
+                        fallback_to_sync: bool = True,
+                        **kwargs):
+        """占位：DeepSeek 暂未实现流式。"""
+        raise NotImplementedError("call_llm_stream not implemented for DeepSeek")
